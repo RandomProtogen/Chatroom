@@ -1,0 +1,271 @@
+import sys
+import datetime
+import logging
+import socket as s
+from PySide6.QtWidgets import *
+from PySide6.QtGui import *
+from PySide6.QtCore import *
+import qdarktheme
+
+class ClientWorker(QRunnable):
+    def __init__(self, conn, addr, log_display, connections):
+        super().__init__()
+        self.conn = conn
+        self.addr = addr
+        self.log_display = log_display
+        self.connections = connections
+
+    def run(self):
+        try:
+            callsign = self.conn.recv(2048).decode()
+            self.log_display.append(f'{callsign} has joined!')
+            self.conn.send("Welcome to our humble chatroom weary traveller!".encode())
+
+            while True:
+                try:
+                    msgraw = self.conn.recv(2048).decode()
+                    msg = f'<{callsign}> {msgraw}'
+                    logging.info(msg)
+                    self.log_display.append(msg)
+                    self.distribute(msg)
+                except Exception as e:
+                    logging.error(f'Error: {e}')
+                    break
+        finally:
+            self.remove_connection()
+
+    def distribute(self, message):
+        for client in self.connections:
+            if client != self.conn:
+                try:
+                    client.send(message.encode())
+                except:
+                    client.close()
+                    if client in self.connections:
+                        self.connections.remove(client)
+
+    def remove_connection(self):
+        try:
+            self.conn.close()
+        except Exception as e:
+            logging.error(f'Error closing connection: {e}')
+        if self.conn in self.connections:
+            self.connections.remove(self.conn)
+        logging.info(f'Connection with {self.addr} closed.')
+        self.log_display.append(f'[-] Connection with {self.addr} closed.')
+
+class ServerApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Server Status: Inactive")
+        self.setMinimumSize(800, 400)
+        self.setGeometry(100, 100, 800, 400)
+
+        self.ip = None
+        self.port = None
+        self.name = None
+        self.connections = []
+
+        self.initUI()
+
+    def initUI(self):
+        mainlayout = QHBoxLayout()
+
+        settingslayout = QVBoxLayout()
+
+        settingstitle = QLabel("Server Settings")
+        settingstitle.setStyleSheet("font-weight: bold; font-size: 16px;")
+        settingslayout.addWidget(settingstitle)
+
+        namelayout = QHBoxLayout()
+        self.namelabel = QLabel("Server Name:")
+        self.nameinput = QLineEdit()
+        self.nameinput.setPlaceholderText("Enter Server Name")
+        namelayout.addWidget(self.namelabel)
+        namelayout.addWidget(self.nameinput)
+        settingslayout.addLayout(namelayout)
+
+        portlayout = QHBoxLayout()
+        self.portlabel = QLabel("Port:")
+        self.portinput = QLineEdit()
+        self.portinput.setPlaceholderText("5 digits")
+        self.portinput.setMaxLength(5)
+        self.portinput.setValidator(QIntValidator(0, 99999))
+        portlayout.addWidget(self.portlabel)
+        portlayout.addWidget(self.portinput)
+        settingslayout.addLayout(portlayout)
+
+        configlayout = QHBoxLayout()
+        self.configlabel = QLabel("Config File:")
+        self.configinput = QLineEdit()
+        self.configinput.setPlaceholderText('Leave this blank to run on default settings')
+        self.configbutton = QPushButton("Browse")
+        self.configbutton.clicked.connect(self.browseconfig)
+        configlayout.addWidget(self.configlabel)
+        configlayout.addWidget(self.configinput)
+        configlayout.addWidget(self.configbutton)
+        settingslayout.addLayout(configlayout)
+
+        buttonlayout = QHBoxLayout()
+        self.startbutton = QPushButton("Start Server")
+        self.startbutton.clicked.connect(self.startserver)
+        self.stopbutton = QPushButton("Stop Server")
+        self.stopbutton.clicked.connect(self.stopserver)
+        self.stopbutton.setEnabled(False)
+        buttonlayout.addWidget(self.startbutton)
+        buttonlayout.addWidget(self.stopbutton)
+        settingslayout.addLayout(buttonlayout)
+
+        usertitle = QLabel("Admin Tools:")
+        usertitle.setStyleSheet("font-weight: bold; font-size: 16px;")
+        settingslayout.addWidget(usertitle)
+        self.usertable = QTableWidget()
+        self.usertable.setColumnCount(4)
+        self.usertable.setHorizontalHeaderLabels(["User  ", "IP Address", "Elapsed Time", "Tools"])
+        settingslayout.addWidget(self.usertable)
+        settingslayout.addWidget(usertitle)
+
+        loglayout = QVBoxLayout()
+        logtitle = QLabel("Logs")
+        logtitle.setStyleSheet("font-weight: bold; font-size: 16px;")
+        loglayout.addWidget(logtitle)
+
+        self.logdisplay = QTextEdit()
+        self.logdisplay.setReadOnly(True)
+        loglayout.addWidget(self.logdisplay)
+
+        mainlayout.addLayout(settingslayout)
+        mainlayout.addLayout(loglayout)
+        container = QWidget()
+        container.setLayout(mainlayout)
+        self.setCentralWidget(container)
+
+        self.threadpool = QThreadPool()
+        thread_count = self.threadpool.maxThreadCount()
+        logging.info(f"Multithreading with maximum {thread_count} threads")
+        self.logdisplay.append(f"Multithreading with maximum {thread_count} threads")
+
+    def browseconfig(self):
+        options = QFileDialog.Options()
+        filename,  = QFileDialog.getOpenFileName(self, "Select Config File", "", "All Files (*);;Text Files (*.txt)", options=options)
+        if filename:
+            self.configinput.setText(filename)
+
+    def startserver(self):
+        try:
+            self.startbutton.setEnabled(False)
+            self.stopbutton.setEnabled(True)
+            self.configinput.setEnabled(False)
+            self.configbutton.setEnabled(False)
+
+            self.setWindowTitle("Server Status: Booting")
+            self.name = self.nameinput.text()
+            if not self.name:
+                self.name = 'General Chat'
+                self.logdisplay.append(f'[+] No name was chosen. Starting as {self.name}')
+            else:
+                self.logdisplay.append(f'[+] Starting {self.name}')
+            self.nameinput.setEnabled(False)
+
+            logging.basicConfig(
+                filename=f'{self.name}.log', filemode='a',
+                format="{levelname} {asctime} - {message}",
+                style="{", datefmt="%Y-%m-%d %H:%M",
+                level=logging.INFO
+            )
+            logging.info(f"Starting server")
+            self.logdisplay.append(f'[+] Log has been started at {self.name}.log')
+
+            self.port = self.portinput.text()
+            if not self.port:
+                self.port = 42069
+            else:
+                self.port = int(self.port)
+            self.portinput.setEnabled(False)
+
+            self.server = s.socket(s.AF_INET, s.SOCK_STREAM)
+            self.server.setsockopt(s.SOL_SOCKET, s.SO_REUSEADDR, 1)
+
+            self.ip = s.gethostbyname(s.gethostname())
+            self.server.bind((str(self.ip), int(self.port)))
+            logging.info(f'Server Binding at {self.ip}:{self.port}')
+            self.logdisplay.append(f'[+] Server Binding at {self.ip}:{self.port}')
+
+            self.usercap = 15
+            self.server.listen(self.usercap)
+            if self.port == 42069 and not self.portinput.text():
+                self.logdisplay.append(f'[+] User cap set to {self.usercap}.')
+                self.logdisplay.append(f'[+] No port was chosen. Listening on port {self.port}')
+            else:
+                self.logdisplay.append(f'[+] User cap set to {self.usercap}. Listening on port {self.port}')
+            logging.info(f'[+] User cap set to {self.usercap}. Listening on port {self.port}')
+
+            # Run the connection handler in a separate thread
+            handler_worker = ConnectionHandlerWorker(self.server, self.logdisplay, self.connections, self.threadpool)
+            self.threadpool.start(handler_worker)
+            
+            self.setWindowTitle('Server Status: Active')
+
+        except Exception as e:
+            self.logdisplay.append(f'[-] Error: {e}')
+            self.logdisplay.append('[-] Aborting...')
+            logging.error(f"Error: {e}")
+            logging.critical('Aborting...')
+            self.stopserver()
+
+    def stopserver(self):
+        self.setWindowTitle("Server Status: Inactive")
+        self.startbutton.setEnabled(True)
+        self.stopbutton.setEnabled(False)
+        self.portinput.setEnabled(True)
+        self.nameinput.setEnabled(True)
+        self.configinput.setEnabled(True)
+        self.configbutton.setEnabled(True)
+
+        for conn in self.connections:
+            try:
+                conn.close()
+                logging.info(f'Connection {conn} closed.')
+            except Exception as e:
+                logging.error(f'Error closing connection {conn}: {e}')
+
+        self.connections.clear()
+
+        if hasattr(self, 'server'):
+            try:
+                self.server.close()
+                logging.info('Server socket closed.')
+            except Exception as e:
+                logging.error(f'Error closing server socket: {e}')
+
+        self.logdisplay.append('[+] Server has been stopped.')
+
+class ConnectionHandlerWorker(QRunnable):
+    def __init__(self, server_socket, log_display, connections, threadpool):
+        super().__init__()
+        self.server_socket = server_socket
+        self.log_display = log_display
+        self.connections = connections
+        self.threadpool = threadpool
+
+    def run(self):
+        while True:
+            try:
+                conn, addr = self.server_socket.accept()
+                self.connections.append(conn)
+                logging.info(f'{addr[0]} has connected!')
+                self.log_display.append(f'[+] {addr[0]} has connected!')
+
+                worker = ClientWorker(conn, addr, self.log_display, self.connections)
+                self.threadpool.start(worker)
+            except Exception as e:
+                logging.error(f"Error accepting connection: {e}")
+                break
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    #app.setStyleSheet(qdarktheme.load_stylesheet()) # Uncomment to enable dark theme
+    window = ServerApp()
+    window.show()
+    sys.exit(app.exec())
