@@ -1,5 +1,24 @@
 import socket
 import threading
+"""
+to do:
+make gui
+when exit signal is called; cleanly closes connections
+implement json for messages [date/time, username, username colour, message content]
+sort of account creation (create username, colour)
+colour for usernames
+user list
+/ commands (whispering, help, cls, possible admin commands)
+connect to server
+spam limit
+client based profanity filtering
+add image support (pls dear god no)
+"""
+
+# start of gui creation, oh boy
+#class ClientApp(QMainWindow):
+
+
 
 def receive_messages(sock):
     while True:
@@ -15,7 +34,7 @@ def receive_messages(sock):
 
 def main():
     server_ip = input("Enter server IP address: ")#socket.gethostbyname(socket.gethostname())
-    server_port = 42069
+    server_port = input("Enter port: ")
     
     try:
         server_port = int(server_port)
@@ -24,6 +43,9 @@ def main():
         return
 
     callsign = input("Enter your username: ")
+    if callsign == "":
+        print("Please enter a username:")
+        return
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
