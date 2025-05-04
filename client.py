@@ -1,5 +1,6 @@
 import socket
 import threading
+
 """
 to do:
 make gui
@@ -18,73 +19,54 @@ add image support (pls dear god no)
 # start of gui creation, oh boy
 #class ClientApp(QMainWindow):
 
+class ChatClient:
+    def __init__(self, host, port):
+        self.server_address = (host, port)
+        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.username = None
+        self.is_running = True
 
-
-def receive_messages(sock):
-    while True:
+    def connect(self):
         try:
-            msg = sock.recv(2048).decode()
-            if not msg:
-                print("Connection closed by the server.")
-                break
-            print(msg)
+            self.client_socket.connect(self.server_address)
+            print("Connected to the server.")
+            self.username = input("Enter your username: ")
+            self.client_socket.send(self.username.encode())
+            print("Welcome to the chatroom!")
+            threading.Thread(target=self.receive_messages, daemon=True).start()
+            self.send_messages()
         except Exception as e:
-            print(f"Error receiving message: {e}")
-            break
+            print(f"Error connecting to server: {e}")
+            self.client_socket.close()
 
-def main():
-    server_ip = input("Enter server IP address: ")#socket.gethostbyname(socket.gethostname())
-    server_port = input("Enter port: ")
-    
-    try:
-        server_port = int(server_port)
-    except ValueError:
-        print("Port must be an integer.")
-        return
+    def receive_messages(self):
+        while self.is_running:
+            try:
+                message = self.client_socket.recv(2048).decode()
+                if message:
+                    print(message)
+                else:
+                    print("Disconnected from server.")
+                    self.is_running = False
+                    self.client_socket.close()
+            except Exception as e:
+                print(f"Error receiving message: {e}")
+                self.is_running = False
+                self.client_socket.close()
 
-    callsign = input("Enter your username: ")
-    if callsign == "":
-        print("Please enter a username:")
-        return
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        sock.connect((server_ip, server_port))
-        print(f"Connected to server at {server_ip}:{server_port}")
-    except Exception as e:
-        print(f"Failed to connect: {e}")
-        return
-
-    # Send the callsign to the server
-    sock.send(callsign.encode())
-
-    # Receive welcome message
-    try:
-        welcome = sock.recv(2048).decode()
-        print(welcome)
-    except Exception as e:
-        print(f"Error receiving welcome message: {e}")
-        sock.close()
-        return
-
-    # Start thread to listen for messages from server
-    receive_thread = threading.Thread(target=receive_messages, args=(sock,), daemon=True)
-    receive_thread.start()
-
-    # Main loop to send messages
-    try:
-        while True:
-            msg = input()
-            if msg.lower() == "/quit":
-                print("Disconnecting...")
+    def send_messages(self):
+        while self.is_running:
+            message = input()
+            if message.lower() == 'exit':
+                self.is_running = False
+                self.client_socket.close()
+                print("Disconnected from the chat.")
                 break
-            if msg.strip() == "":
-                continue
-            sock.send(msg.encode())
-    except KeyboardInterrupt:
-        print("\nDisconnecting...")
-
-    sock.close()
+            self.client_socket.send(message.encode())
 
 if __name__ == "__main__":
-    main()
+    host = socket.gethostbyname(socket.gethostname())
+    port = int(input("Enter server port (default 42069): ") or 42069)
+    
+    client = ChatClient(host, port)
+    client.connect()
