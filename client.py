@@ -1,11 +1,10 @@
-import socket
-import threading
-
 """
 to do:
-make gui
+make gui DONE
 when exit signal is called; cleanly closes connections
-implement json for messages [date/time, username, username colour, message content]
+make showing server info toggleable
+implement json for messages [date/time, username, username colour, message content] pretty much done
+add users who are typing when input.text.changed input != ""
 sort of account creation (create username, colour)
 colour for usernames
 user list
@@ -16,31 +15,11 @@ client based profanity filtering
 add image support (pls dear god no)
 """
 
-# start of gui creation, oh boy
-#class ClientApp(QMainWindow):
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import *
 from PySide6.QtWidgets import *
 from PySide6.QtCore import *
-import socket, _thread, sys, time
-
-"""
-to do:
-make gui 
-make showing server info toggleable 
-add users who are typing when input.text.changed input != ""
-when exit signal is called; cleanly closes connections
-implement json for messages [date/time, username, username colour, message content, first time join?]
-sort of account creation (create username, colour)
-colour for usernames
-user list
-/ commands (whispering, help, cls, possible admin commands)
-connect to server
-spam limit
-client based profanity filtering
-add image support (pls dear god no)
-"""
-colours = ["Red", "Blue"]
+import socket, _thread, sys, time, threading
 
 # start of gui creation, oh boy
 
@@ -50,7 +29,7 @@ class MainWindow(QMainWindow):
         super().__init__() # it was in the tutorial -_- canon event fr
         
         self.setWindowTitle("Rizzcord for Nerds") # Sets window title
-        self.setMinimumSize(1200,800)
+        self.setMinimumSize(1200,600)
 
         my_icon = QIcon()
         my_icon.addFile('images\\image.png')
@@ -60,6 +39,7 @@ class MainWindow(QMainWindow):
 
     def initialiseWidgets(self): # new function just to seperate the creation and initialization of widgets
         
+        mainlayoutnew = QHBoxLayout()
         mainlayout = QGridLayout() # main layout that is the root of everything
         infoColumnnew = QVBoxLayout() # created so that columns dont overlap
         messageColumnnew = QVBoxLayout() # created for same reason
@@ -70,11 +50,13 @@ class MainWindow(QMainWindow):
         userListMain = QVBoxLayout()
         userListTitle = QLabel("Users:") # creates the title
         userListMain.addWidget(userListTitle)
-        self.userList = QLabel("User1\nUser2\nStupid Idiot mf udawgduahiodwjhaodjhwaoidjwaoidwa") # creates a larger text box 
+        self.userList = QTextEdit() #creates log text box
+        self.userList.setReadOnly(True)
+        #self.userList = QLabel("User1\nUser2\nStupid Idiot mf udawgduahiodwjhaodjhwaoidjwaoidwa") # creates a larger text box 
         # User list should update when users change
 
         userListMain.addWidget(self.userList)
-        infoColumn.addLayout(userListMain, 0, 0, 5, 0)
+        infoColumnnew.addLayout(userListMain)
 
 
         # Server/User info
@@ -83,42 +65,44 @@ class MainWindow(QMainWindow):
         serverIPMain = QHBoxLayout()
         ipTitle = QLabel("Server IP: ")
         serverIPMain.addWidget(ipTitle)
-        ipEntry = QLineEdit()
-        serverIPMain.addWidget(ipEntry)
-        infoColumn.addLayout(serverIPMain, 6, 0, 1, 0)
+        self.ipEntry = QLineEdit()
+        serverIPMain.addWidget(self.ipEntry)
+        self.ipEntry.setText("127.0.0.1")
+        infoColumnnew.addLayout(serverIPMain)
 
         # Port (pretty much copy and paste of IP)
 
         serverPortMain = QHBoxLayout()
         portTitle = QLabel("Port: ")
         serverPortMain.addWidget(portTitle)
-        portEntry = QLineEdit()
-        serverPortMain.addWidget(portEntry)
-        infoColumn.addLayout(serverPortMain, 7, 0, 1, 0)
+        self.portEntry = QLineEdit()
+        serverPortMain.addWidget(self.portEntry)
+        self.portEntry.setText("42069")
+        infoColumnnew.addLayout(serverPortMain)
 
         # Username
         usernameMain = QHBoxLayout()
         usernameTitle = QLabel("Username: ")
         usernameMain.addWidget(usernameTitle)
-        usernameEntry = QLineEdit()
-        usernameMain.addWidget(usernameEntry)
-        infoColumn.addLayout(usernameMain, 8, 0, 1, 0)
+        self.usernameEntry = QLineEdit()
+        usernameMain.addWidget(self.usernameEntry)
+        infoColumnnew.addLayout(usernameMain)
 
         # Colour
 
         coloursMain = QHBoxLayout()
         coloursTitle = QLabel("Colours: ")
         coloursMain.addWidget(coloursTitle)
-        coloursOptions = QComboBox()
-        coloursOptions.addItems(["Red", "Blue", "1", "2", "3"])
-        coloursMain.addWidget(coloursOptions)
-        infoColumn.addLayout(coloursMain, 9, 0, 1, 0)
+        self.coloursOptions = QComboBox()
+        self.coloursOptions.addItems(["Red", "Blue", "1", "2", "3"])
+        coloursMain.addWidget(self.coloursOptions)
+        infoColumnnew.addLayout(coloursMain)
 
         # Connect
         self.connected = False
         self.connectButton = QPushButton("Connect")
         self.connectButton.clicked.connect(self.connectToServer)
-        infoColumn.addWidget(self.connectButton, 10, 0, 1, 0)
+        infoColumnnew.addWidget(self.connectButton)
 
 
 
@@ -130,26 +114,36 @@ class MainWindow(QMainWindow):
         # messageEntry
         messageEntryMain = QHBoxLayout()
         self.messageEntry = QLineEdit()
-        self.messageEntry.setPlaceholderText('Enter Message                                       ')
+        self.messageEntry.setPlaceholderText('Enter Message')
+        self.messageEntry.returnPressed.connect(self.sendMessage)
+        self.messageEntry.setEnabled(False)
         messageEntryMain.addWidget(self.messageEntry)
-        sendButton = QPushButton("Send")
-        messageEntryMain.addWidget(sendButton)
+        self.sendButton = QPushButton("Send")
+        self.sendButton.clicked.connect(self.sendMessage)
+        self.sendButton.setEnabled(False)
+        messageEntryMain.addWidget(self.sendButton)
         messageColumn.addLayout(messageEntryMain, 1, 0)
 
 
 
         # places the two main columns
-        messageColumnnew.addLayout(messageColumn)
+
         infoColumnnew.addLayout(infoColumn)
+        messageColumnnew.addLayout(messageColumn)
+        
 
         
+        mainlayoutnew.addLayout(infoColumnnew, 1)
+        mainlayoutnew.addLayout(messageColumnnew, 4)
         
-        mainlayout.addLayout(infoColumnnew, 0, 0, 0, 0) # Adds a column for info that spans 1 column 
-        mainlayout.addLayout(messageColumnnew, 0, 1, 0, 3) # Adds a  column for messages (sending and receiving) that spans 4 columns
+        #mainlayout.addLayout(messageColumnnew, 0, 1, 0, 3) # Adds a  column for messages (sending and receiving) that spans 4 columns
+        #mainlayout.addLayout(infoColumnnew, 0, 0, 0, 0) # Adds a column for info that spans 1 column 
+        
 
         # finally places the mainlayout
         centralWidget = QWidget() #empty widget to put grid into, code breaks if this isnt done
-        centralWidget.setLayout(mainlayout)
+        centralWidget.setLayout(mainlayoutnew)
+        #centralWidget.setLayout(mainlayout)
         self.setCentralWidget(centralWidget)
 
 
@@ -157,29 +151,73 @@ class MainWindow(QMainWindow):
         
         # get the user list from server OR have a variable that gets updated when user join/leave
         self.userList.setText("data from server")
-    
+
+
     def connectToServer(self):
         print("test")
         self.messagesdisplay.append("test")
+
         # also change button purpose to be disconnect
         if self.connected == False:
             self.connectButton.setText("Disconnect")
             self.connected = True
+            self.ipEntry.setEnabled(False)
+            self.portEntry.setEnabled(False)
+            self.usernameEntry.setEnabled(False)
+            self.coloursOptions.setEnabled(False)
+            self.messageEntry.setEnabled(True)
+            self.sendButton.setEnabled(True)
         else:
             self.connectButton.setText("Connect")
             self.connected = False
-        
+            self.ipEntry.setEnabled(True)
+            self.portEntry.setEnabled(True)
+            self.usernameEntry.setEnabled(True)
+            self.coloursOptions.setEnabled(True)
+            self.messageEntry.setEnabled(False)
+            self.sendButton.setEnabled(False)
+    
+    def sendMessage(self):
+        message = self.messageEntry.text()
+        if self.usernameEntry.text() == "":
+            self.messagesdisplay.append("<Please enter a Username>")
+            return
+        elif self.messageEntry.text() == "":
+            return
+        elif message[0] == "/":
+            self.messageEntry.setText("")
+            if message == "/help":
+                self.messagesdisplay.append("Commands are:\n/help - Brings up this list\n/whisper or /w - privately message a user\n/clear - Clears the message log\n/profanity add/remove/toggle - Adds to or removes from the profanity or toggles it on or off\n/disconnect - If you can't manage to find the button yourself")
+            else:
+                self.messagesdisplay.append(f"'{message}' not found")
+
+        else:
+            
+            self.messageinfo = {
+                "type": "message",
+                "username": self.usernameEntry.text(),
+                "message": message
+            }
+            print("sent")
+            # This is where the message will be then sent as a dictionary
+            self.messagesdisplay.append(f"<{self.messageinfo["username"]}> {self.messageinfo["message"]}") # change this to be parts of the json stuff
+            self.messageEntry.setText("")
+
+    def windowClosed(self, event: QCloseEvent):
+        print("window closed") # add ability to cleanly close connection when window closed
+
+
         
 
-'''
+
 if __name__ == "__main__": # checks if this file is being run
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show() # actually shows the window wow
     
     app.exec()
-'''
 
+'''
 class ChatClient:
     def __init__(self, host, port):
         self.server_address = (host, port)
@@ -226,13 +264,20 @@ class ChatClient:
             self.client_socket.send(message.encode())
 
 if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = QWidget()
+    window.show()
+    app.exec()
+
+    
+    
     host = socket.gethostbyname(socket.gethostname())
     port = int(input("Enter server port (default 42069): ") or 42069)
     
     client = ChatClient(host, port)
     client.connect()
 
-
+'''
 
 
 
@@ -331,4 +376,3 @@ def main():
 if __name__ == "__main__":
     main()
 '''
-
