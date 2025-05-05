@@ -1,0 +1,17 @@
+{
+  "name": {
+    "_comment": "name of server, simples",
+    "name": "Le Bois"},
+  "welcome": {
+    "_comment": "greeting message for newly joined users",
+    "msg": "f'Welcome to our humble chatroom traveller!'"},
+  "usercap": {
+    "_comment": "max amount of connections the server will accept, please use an integer or the server will hang",
+    "cap": 15},
+  "logfile": {
+    "_comment": "the name of the file used for logging, no need to include .log",
+    "file": "bois"},
+  "banlist": {
+    "_comment": "persistent banlist for server",
+    "banned": []}
+}
