@@ -1,97 +1,46 @@
-import sys, datetime, logging, socket as s
+import sys, datetime, logging, socket as s, select, json
 from PySide6.QtWidgets import *
 from PySide6.QtGui import *
 from PySide6.QtCore import *
 import qdarktheme
 
-class ClientSignals(QObject): #signals class to communicate from worker threads to main ui thread because you have to do ui stuff in the ui class
-    userjoined = Signal(str, str)  #this just defines signals to communicate with different classes and threads 
-    usersleft = Signal(str)          
-    logmsgs = Signal(str) #e.g this signal is just for communicating with the logdisplay ui in the ui thread
-    msgreceived = Signal(str)  
+class ClientSignals(QObject):
+    userjoined = Signal(str, str)  #callsign, ip
+    usersleft = Signal(str)
+    logmsgs = Signal(str)
+    msgreceived = Signal(str)
 
-class ClientWorker(QRunnable):
-    def __init__(self, conn, addr, connections, users, signals): 
-        super().__init__() #ngl, no idea what this does, i followed the tutorial like a good soldier
-        self.users = users
-        self.conn = conn #connection is carried over
-        self.addr = addr #so is addr
-        self.connections = connections #carries over connection array, signals, etc.
-        self.signals = signals 
-        self.callsign = None
-        self.isactive = True
-
-    def run(self): #this is the main client thread which recieves there username sends out a welcome msg
-        try:
-            self.callsign = self.conn.recv(2048).decode() #gets the first transmission which should be le username, figure out colour later
-            if not self.callsign:
-                self.conn.close()
-                return
-            #uses signal to notify ui thread of new user (puits new table)
-            self.signals.userjoined.emit(self.callsign, self.addr[0])
-            self.signals.logmsgs.emit(f'{self.callsign} has joined!')
-            self.signals.msgreceived.emit(f'{self.callsign} has joined!')
-            logging.info(f'{self.callsign} has joined!')
-            try:
-                self.conn.send("Welcome to our humble chatroom weary traveller!".encode())
-            except Exception as e:
-                self.signals.logmsgs.emit(f'Error sending welcome message: {e}')
-                logging.error(f'Error sending welcome message: {e}')
-                #gracefully ignores the error
-
-            while self.isactive:
-                try:
-                    msgraw = self.conn.recv(2048).decode()
-                    if not msgraw:  #client closed connection
-                        break
-                    msg = f'<{self.callsign}> {msgraw}'
-                    self.signals.logmsgs.emit(msg)
-                    self.signals.msgreceived.emit(msg)
-                    logging.info(f'Message from {self.callsign}: {msgraw}')
-                except Exception as e:
-                    self.signals.logmsgs.emit(f'Error receiving message: {e}')
-                    logging.error(f'Error receiving message: {e}')
-                    break
-        finally:
-            self.removeconn()
-
-    def removeconn(self):
-        try:
-            self.conn.close() #trys to close le connection
-        except Exception as e:
-            self.signals.logmsgs.emit(f'Error closing connection: {e}')
-            logging.error(f'Error closing connection: {e}')
-        
-        #removes connection from connection list
-        if self.conn in self.connections:
-            self.connections.remove(self.conn)
-
-        #notify ui to remove user (removes ui table row)
-        if self.callsign:
-            self.signals.usersleft.emit(self.callsign)
-            self.signals.logmsgs.emit(f'Connection with {self.addr} closed.')
-            logging.info(f'User {self.callsign} left')  #logs user leaving
-
-class ServerApp(QMainWindow): #this is the ui class thread
+class ServerApp(QMainWindow):
     def __init__(self):
-        super().__init__() #ngl, i dont know what this does, i ama good soldier and follow tutorials
-        self.setWindowTitle("Server Status: Inactive") #sets the window title
-        self.setMinimumSize(800, 425) #sets the min size of 800, 400px
-        self.setGeometry(100, 100, 800, 400) #this is the starting size
+        super().__init__() #ngl, no i dea what this does, i followed  the tutorial like a good soldier
+        self.setWindowTitle("Server Status: Inactive") #sets title
+        self.setMinimumSize(800, 450) #sets min size
+        self.setGeometry(100, 100, 800, 400) #sets default launch size 
 
-        self.ip = None #just defines some variables that will be used later
+        self.ip = None
         self.port = None
         self.name = None
-        self.connections = []
 
-        #signals used for thread friendly ui updates
-        self.signals = ClientSignals()
+        #maps from socket to (callsign, ip)
+        self.connections = {}  #format lime socket: (callsign, ip)
+        #maps from callsign to socket
+        self.callsigntosock = {}
+        self.jointimemap = {}
+
+        self.signals = ClientSignals() #starts the signals and connects them to functions
         self.signals.userjoined.connect(self.adduserrow)
         self.signals.usersleft.connect(self.removeuserrow)
         self.signals.logmsgs.connect(self.appendlog)
         self.signals.msgreceived.connect(self.distribute)
 
-        self.initUI() #this as it says, iniatiates ui
+        self.elapsedtimer = QTimer() #strats a QTimer which has buily in timebased functions
+        self.elapsedtimer.timeout.connect(self.updatetimer)
+        self.elapsedtimer.start(1000) #like this which triggers every 1000ns
+
+        self.initUI()
+
+    def closeEvent(self, event: QCloseEvent):
+        self.stopserver()
 
     def initUI(self):
         mainlayout = QHBoxLayout() #this is horizantal container for the two vertical columns
@@ -127,7 +76,7 @@ class ServerApp(QMainWindow): #this is the ui class thread
         self.configbutton = QPushButton("Browse")
         self.configbutton.clicked.connect(self.browseconfig) #connects up to the filebrowser function, we can revampy this later
         configlayout.addWidget(self.configlabel)
-        configlayout.addWidget(self.configlabel)
+        #configlayout.addWidget(self.configlabel)
         configlayout.addWidget(self.configinput)
         configlayout.addWidget(self.configbutton)
         settingslayout.addLayout(configlayout)
@@ -169,39 +118,48 @@ class ServerApp(QMainWindow): #this is the ui class thread
         self.setCentralWidget(container) #focuses the screen
 
         self.threadpool = QThreadPool() #this is where is starts to get fun, multithreading baby
-        threadcount = self.threadpool.maxThreadCount() #this just gets the max thread counts
-        logging.basicConfig( #logging has started
-            format="{levelname} {asctime} - {message}",
-            style="{",
-            datefmt="%Y-%m-%d %H:%M",
-            level=logging.INFO,
-            filename='server.log', #i want to fix this later, i want it to be the name of the server 
-            filemode='a'
-        )
-        logging.info(f"Multithreading with maximum {threadcount} threads") #logs that shit
-        self.appendlog(f"Multithreading with maximum {threadcount} threads")
+        self.threadcount = self.threadpool.maxThreadCount() #this just gets the max thread counts
 
-    def browseconfig(self): #this just gets up the file browser
+        #logs that shit
+        self.appendlog(f"Multithreading with maximum {self.threadcount} threads")
+
+    def browseconfig(self):  # this just gets up the file browser
         options = QFileDialog.Options()
-        filename,  = QFileDialog.getOpenFileName(self, "Select Config File", "", "All Files (*);;Text Files (*.txt)", options=options)
+        filename, _ = QFileDialog.getOpenFileName(parent=self, caption="Select Config File", filter='JSON Files (*.json)', options=options)
         if filename:
-            self.configinput.setText(filename) #shoves the file path in the entry
+            self.configinput.setText(filename)
 
-    def startserver(self): #this is the spinup protocol, fancy i know
+    def startserver(self):
         try:
-            self.startbutton.setEnabled(False) #this just diables a lot of the entrys so you cant mess with it whilre its running
-            self.stopbutton.setEnabled(True)
+            self.stopbutton.setEnabled(True) #enables the stop server button
+            self.startbutton.setEnabled(False) #disables a bunch of widgets so you cant mess with parmaeter
             self.configinput.setEnabled(False)
             self.configbutton.setEnabled(False)
+            self.nameinput.setEnabled(False)
+            self.portinput.setEnabled(False)
+
+            self.setupLogging()
+            #logging.info(f"Multithreading with maximum {self.threadcount} threads") 
 
             self.setWindowTitle("Server Status: Booting") #sets the window to boot
-            self.name = self.nameinput.text() #gets the text inside the name entry
-            if not self.name: #if its empty put the default name in
-                self.name = 'General Chat'
-                self.appendlog(f'No name was chosen. Starting as {self.name}')
+            if not self.configinput.text():
+                self.name = self.nameinput.text() #gets the text inside the name entry
+                if not self.name: #if its empty put the default name in
+                    self.name = 'General Chat'
+                    self.appendlog(f'No name was chosen. Starting as {self.name}')
+                else:
+                    self.appendlog(f'Starting server under the name {self.name}')
+                self.nameinput.setEnabled(False) #disables name entry
             else:
-                self.appendlog(f'Starting {self.name}')
-            self.nameinput.setEnabled(False) #disables name entry
+                try:
+                    with open(self.configinput.text(), 'r') as f:
+                        jsraw = f.read()
+                        jspars = json.loads(jsraw)
+                        self.name = jspars['name']['name']
+                        self.appendlog(f'Starting server under the name {self.name}')
+                except Exception:
+                    self.name = 'General Chat'
+                    self.appendlog(f'No name was chosen. Starting as {self.name}')
 
             self.port = self.portinput.text() #gets le port entry val
             if not self.port: #if its empty then it becomes dfault
@@ -218,7 +176,17 @@ class ServerApp(QMainWindow): #this is the ui class thread
             logging.info(f'Server Binding at {self.ip}:{self.port}') #logs it
             self.logdisplay.append(f'[{datetime.datetime.now().strftime('%H:%M:%S')}] Server Binding at {self.ip}:{self.port}')
             
-            self.usercap = 15 #set the usercapm figure out the config file later
+            if not self.configinput.text():
+                self.usercap = 15
+            else:
+                try:
+                    with open(self.configinput.text(), 'r') as f:
+                        jsraw = f.read()
+                        jspars = json.loads(jsraw)
+                        self.usercap = int(jspars['usercap']['cap'])
+                except Exception:
+                    logging.error("Error reading config file, using default usercap")
+                    self.usercap = 15
             self.server.listen(self.usercap) #listens for set amount of conns
 
             if self.port == 42069 and not self.portinput.text(): #just a custom message if its default port
@@ -228,158 +196,300 @@ class ServerApp(QMainWindow): #this is the ui class thread
                 self.logdisplay.append(f'[{datetime.datetime.now().strftime('%H:%M:%S')}] User cap set to {self.usercap}. Listening on port {self.port}')
             logging.info(f'User cap set to {self.usercap}. Listening on port {self.port}')
 
-            handlerworker = ConnectionHandlerWorker(self.server, self.threadpool, self.connections, self.usertable, self.signals) #starts up client thread
-            self.threadpool.start(handlerworker) #pushds the thread
+            self.socketthr = QThread() #this is all to start the connection handlers
+            self.socketworker = SocketSelectWorker(self.server, self.connections, self.callsigntosock, self.signals, self.configinput)
+            self.socketworker.moveToThread(self.socketthr)
+            self.socketthr.started.connect(self.socketworker.run)
+            self.socketworker.finished.connect(self.socketthr.quit)
+            self.socketworker.finished.connect(self.socketworker.deleteLater)
+            self.socketthr.finished.connect(self.socketthr.deleteLater)
+            self.socketthr.start() #starts thread
+            self.appendlog('ConnectionHandler() succesfully started')
+            logging.info('ConnectionHandler() succesfully started')
 
-            self.setWindowTitle('Server Status: Active') #sets window title and server status to active
-        except Exception as e: #error stuff
-            self.appendlog(f'Error: {e}') #logs it
-            logging.error(f"Error: {e}") 
-            self.stopserver() #stops the server
+            self.setWindowTitle('Server Status: Active')
+        except Exception as e: #error handling
+            self.appendlog(f'Error: {e}')
+            logging.error(e)
+            self.stopserver()
 
-    def stopserver(self): #you could potentially call this a spindown protocal, fancy eh
-        self.setWindowTitle("Server Status: Inactive") #sets the server status to inactive
-        self.startbutton.setEnabled(True) #reenables the entrys and diables the stop button
+    def stopserver(self):
+        self.setWindowTitle("Server Status: Inactive")
+        self.startbutton.setEnabled(True)
         self.stopbutton.setEnabled(False)
         self.portinput.setEnabled(True)
         self.nameinput.setEnabled(True)
         self.configinput.setEnabled(True)
         self.configbutton.setEnabled(True)
 
-        for conn in self.connections: #gets all the connections and closes each one
+        if hasattr(self, 'server'):
             try:
-                conn.close()
-                logging.info(f'Connection {conn} closed.')
-            except Exception as e: #just in case of an error
-                logging.error(f'Error closing connection {conn}: {e}')
-
-        self.connections.clear() #clears the connection list
-
-        if hasattr(self, 'server'): #if its the server socket does some special sauce
+                self.socketworker.running = False
+            except Exception:
+                pass
             try:
+                #closes client connections
+                for sock in list(self.connections.keys()):
+                    try:
+                        sock.send('Server Closing...'.encode())
+                        self.disconnect(sock)
+                    except Exception:
+                        pass
+                for user in self.connections:
+                    try:
+                        self.removeuserrow(user)
+                    except Exception:
+                        pass
+                self.connections.clear()
+                self.callsigntosock.clear()
                 self.server.close()
                 logging.info('Server socket closed.')
-            except Exception as e: #more error handling
-                logging.error(f'Error closing server socket: {e}') 
+            except Exception as e:
+                logging.error(f'Error closing server socket: {e}')
 
-        self.appendlog('Server has been stopped.') #just more log
+        self.appendlog('Server has been stopped.')
 
-    def appendlog(self, message): #appends log baby
-        timestamp = datetime.datetime.now().strftime('%H:%M:%S') #custom formatting logs to include timestamps
+    def appendlog(self, message):
+        timestamp = datetime.datetime.now().strftime('%H:%M:%S')
         self.logdisplay.append(f'[{timestamp}] {message}')
 
+    def setupLogging(self):
+        if not self.configinput.text():
+            self.logname = "server"
+        else:
+            try:
+                with open(self.configinput.text(), 'r') as f:
+                    jsraw = f.read()
+                    jspars = json.loads(jsraw)
+                    self.logname = jspars.get("logfile", {}).get("file", "server")
+            except Exception as e:
+                logging.error("Error reading config file for log name, using default logname: %s", e)
+                self.logname = 'server'
+        logging.basicConfig(
+            format="{levelname} {asctime} - {message}",
+            style="{",
+            datefmt="%Y-%m-%d %H:%M",
+            level=logging.INFO,
+            filename=f'{self.logname}.log',
+            filemode='a'
+        )
+        logging.info(f"Logging started at {self.logname}.log")
+        self.appendlog(f"Logging started at {self.logname}.log")
+
     def adduserrow(self, callsign, ipaddr):
-        #adds user to the usertable safely on the main thread
-        rowspos = self.usertable.rowCount() #this stuff is just getting the table and setting values
+        rowspos = self.usertable.rowCount()
         self.usertable.insertRow(rowspos)
         self.usertable.setItem(rowspos, 0, QTableWidgetItem(callsign))
         self.usertable.setItem(rowspos, 1, QTableWidgetItem(ipaddr))
         self.usertable.setItem(rowspos, 2, QTableWidgetItem('0h 0m 0s'))
+        self.jointimemap[callsign] = datetime.datetime.now()
 
-        toolslayout = QHBoxLayout() #horizantal layout for side to side buttons
-        toolslayout.setContentsMargins(0, 0, 0, 0) #disables margins
-        toolslayout.setSpacing(5) #sets paddings
-
-        toolswidg = QWidget() #empty container to shove in the cell
-        kickbtn = QPushButton('K') #defines buttons
-        #kickico = QIcon('assets/kick.ico') #sets the icon
-        #kickbtn.setIcon(kickico) #shoves the icon in the button
+        toolslayout = QHBoxLayout()
+        toolslayout.setContentsMargins(0, 0, 0, 0)
+        toolslayout.setSpacing(5)
+        toolswidg = QWidget()
+        kickbtn = QPushButton('K')
         banbtn = QPushButton('B')
-        #banico = QIcon('assets/ban.ico')
-        #banbtn.setIcon(banico)
         timeoutbtn = QPushButton('T')
-        #timeoutico = QIcon('assets/timeout.ico')
-        #timeoutbtn.setIcon(timeoutico)
- 
-        kickbtn.clicked.connect(lambda: self.kick(rowspos)) #connects up the buttons to functions
-        banbtn.clicked.connect(lambda: self.ban(rowspos))
-        timeoutbtn.clicked.connect(lambda: self.naughtycorner(rowspos))
 
-        toolslayout.addWidget(kickbtn) #adds widgets to container
+        kickbtn.clicked.connect(lambda _, row=rowspos: self.kick(row))
+        banbtn.clicked.connect(lambda _, row=rowspos: self.ban(row))
+        timeoutbtn.clicked.connect(lambda _, row=rowspos: self.naughtycorner(row))
+
+        toolslayout.addWidget(kickbtn)
         toolslayout.addWidget(banbtn)
         toolslayout.addWidget(timeoutbtn)
-        toolswidg.setLayout(toolslayout) #sets layouts
+        toolswidg.setLayout(toolslayout)
+        self.usertable.setCellWidget(rowspos, 3, toolswidg)
 
-        self.usertable.setCellWidget(rowspos, 3, toolswidg) #shoves that lyout in a cell
-
-    def removeuserrow(self, callsign): #function to remove user row
-        for row in range(self.usertable.rowCount()): # sorts through the rows
-            item = self.usertable.item(row, 0) #gets the callsign in cell one (or programmer brain zero) val
-            if item and item.text() == callsign: #if the callsign is equal to the one we looking for it removes the row
+    def removeuserrow(self, callsign):
+        for row in range(self.usertable.rowCount()):
+            item = self.usertable.item(row, 0)
+            if item and item.text() == callsign:
                 self.usertable.removeRow(row)
                 break
-        self.signals.logmsgs.emit(f'{self.callsign} has left!')
-        self.signals.msgreceived.emit(f'{self.callsign} has left!')
+
+        self.jointimemap.pop(callsign, None)
+
+        self.signals.logmsgs.emit(f'{callsign} has left!')
+        self.signals.msgreceived.emit(f'{callsign} has left!')
+
+    def updatetimer(self):
+        now = datetime.datetime.now()
+        for row in range(self.usertable.rowCount()):
+            callsignitem = self.usertable.item(row, 0)
+            if not callsignitem:
+                continue
+            callsign = callsignitem.text()
+            if callsign in self.jointimemap:
+                jointime = self.jointimemap[callsign]
+                elapsed = now - jointime
+                h, remainder = divmod(int(elapsed.total_seconds()), 3600)
+                m, s = divmod(remainder, 60)
+                elapsedstr = f"{h}h {m}m {s}s"
+                elapseditem = self.usertable.item(row, 2)
+                if elapseditem:
+                    elapseditem.setText(elapsedstr)
 
     def distribute(self, message):
-        #send message to all connections except the sender
-        for client in self.connections:
+        #send message to all clients
+        for sock in list(self.connections.keys()):
             try:
-                client.send(message.encode())
+                sock.send(message.encode())
             except Exception as e:
                 logging.error(f'Error sending message to client: {e}')
-                client.close()
-                if client in self.connections:
-                    self.connections.remove(client)
+                self.disconnect(sock)
 
-    #placeholder methods for admin tools
+    def disconnect(self, sock):
+        #safely disconnect and clean up a client socket
+        if sock in self.connections:
+            try:
+                sock.close()
+            except Exception:
+                pass
+            callsign, _ = self.connections.pop(sock)
+            self.callsigntosock.pop(callsign, None)
+            self.signals.usersleft.emit(callsign)
+            self.signals.logmsgs.emit(f'Connection with {callsign} closed.')
+            logging.info(f'User {callsign} disconnected')
+
+    #admin tools placeholders
     def kick(self, row):
         callsignitem = self.usertable.item(row, 0)
-        reply = QMessageBox.question(self, 'Confirmation', f"Are you sure you want to ban {callsignitem.text()}", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if callsignitem:
             callsign = callsignitem.text()
+            reply = QMessageBox.question(self, 'Confirmation', f"Are you sure you want to kick {callsign}?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply == QMessageBox.Yes:
                 self.appendlog(f'{callsign} has been kicked')
                 logging.info(f'{callsign} has been kicked')
-                self.disconnect(callsign) #find connection and close it
+                sock = self.callsigntosock.get(callsign)
+                if sock:
+                    self.disconnect(sock)
 
     def ban(self, row):
-        usernameitem = self.usertable.item(row, 0)
-        if usernameitem:
-            username = usernameitem.text()
-            self.appendlog(f'[ADMIN] Ban requested for user: {username}')
-            #put logic in later
+        callsignitem = self.usertable.item(row, 0)
+        if callsignitem:
+            callsign = callsignitem.text()
+            self.appendlog(f'[ADMIN] Ban requested for user: {callsign}')
+            #ban logic to be implemented
 
     def naughtycorner(self, row):
-        usernameitem = self.usertable.item(row, 0)
-        if usernameitem:
-            username = usernameitem.text()
-            self.appendlog(f'[ADMIN] Timeout requested for user: {username}')
-            #put logic in later
+        callsignitem = self.usertable.item(row, 0)
+        if callsignitem:
+            callsign = callsignitem.text()
+            self.appendlog(f'[ADMIN] Timeout requested for user: {callsign}')
+            #timeout logic to be implemented
 
-    def disconnect(self, username):
-        #disconnects user by callsign
-        disconnect = None
-        for conn in self.connections:
-            #to find corresponding callsign, we would need a map callsign->conn, simplify for now
-            #since no such map, skipping detailed implementation
-            #ass a workaround, send a kick message or close all connections? 
-            #in real app you should keep {callsign: conn} mapping.
-            #here just close all connections as demo
-            pass
-        #this method should be extended to map callsigns to connections properly
-
-class ConnectionHandlerWorker(QRunnable):
-    def __init__(self, serversock, threadpool, connections, userstable, signals):
+class SocketSelectWorker(QObject):
+    finished = Signal()
+    def __init__(self, serversock, connections, callsigntosock, signals, config):
         super().__init__()
         self.serversock = serversock
-        self.threadpool = threadpool
-        self.connections = connections
-        self.userstable = userstable
+        self.connections = connections #socket -> (callsign, ip)
+        self.callsigntosock = callsigntosock
         self.signals = signals
+        self.running = True
+        self.configinput = config
+        self.serversock.setblocking(False)
+
+        self.buffers = {}  #socket -> bytearray buffer of received but incomplete data
 
     def run(self):
-        while True:
-            try:
-                conn, addr = self.serversock.accept()
-                self.connections.append(conn)
-                self.signals.logmsgs.emit(f'{addr[0]} has connected!')
-                #start clientworker with signals for ui updating
-                worker = ClientWorker(conn, addr, self.connections, self.userstable, self.signals)
-                self.threadpool.start(worker)
-            except Exception as e:
-                logging.error(f"Error accepting connection: {e}")
-                break
+        try:
+            inputs = [self.serversock]
+            while self.running:
+                readable, _, exceptional = select.select(inputs, [], inputs, 1)
+                for sck in readable:
+                    if sck is self.serversock:
+                        #accept new connection
+                        try:
+                            conn, addr = self.serversock.accept()
+                            conn.setblocking(False)
+                            inputs.append(conn)
+                            self.buffers[conn] = bytearray()
+                            self.signals.logmsgs.emit(f'{addr[0]} has connected!')
+                        except Exception as e:
+                            logging.error(f"Accept failed: {e}")
+                    else:
+                        try:
+                            data = sck.recv(2048)
+                            if data:
+                                self.buffers[sck].extend(data)
+                                #check if callsign known for this socket
+                                if sck not in self.connections:
+                                    #first message expected is callsign terminated by newline or all data available
+                                    try:
+                                        #decode buffer and strip spaces/newlines
+                                        msg = self.buffers[sck].decode(errors='ignore').strip()
+                                        if msg:
+                                            callsign = msg
+                                            ip = sck.getpeername()[0]
+                                            self.connections[sck] = (callsign, ip)
+                                            self.callsigntosock[callsign] = sck
+                                            self.buffers[sck] = bytearray()  #clear buffer after callsign received
+                                            self.signals.userjoined.emit(callsign, ip)
+                                            self.signals.logmsgs.emit(f'{callsign} has joined!')
+                                            self.signals.msgreceived.emit(f'{callsign} has joined!')
+                                            logging.info(f'{callsign} has joined!')
+                                            if not self.configinput.text():
+                                                welcomemsg = f"Welcome to our humble chatroom {callsign}!"
+                                            else:
+                                                try:
+                                                    with open(self.configinput.text()) as f:
+                                                        jsraw = f.read()
+                                                        jspars = json.loads(jsraw)
+                                                        welcomemsg = str(eval((jspars['welcome']['msg'])))
+                                                except Exception: 
+                                                    logging.error("Error reading config file, using default welcome message")
+                                                    welcomemsg = f"Welcome to our humble chatroom {callsign}!"
+                                                    
+                                            sck.send(f'{welcomemsg}\n'.encode())
+                                    except Exception as ex:
+                                        logging.error(f"Error reading callsign: {ex}")
+                                        self.closesock(sck, inputs)
+                                else:
+                                    callsign, _ = self.connections[sck]
+                                    try:
+                                        #consider all data as message (strip trailing newlines)
+                                        msgtext = self.buffers[sck].decode(errors='ignore').strip()
+                                        if msgtext:
+                                            msg = f'<{callsign}> {msgtext}'
+                                            self.signals.logmsgs.emit(msg)
+                                            self.signals.msgreceived.emit(msg)
+                                            logging.info(f'Message from {callsign}: {msgtext}')
+                                            #clear buffer after processing message
+                                            self.buffers[sck] = bytearray()
+                                    except Exception as e:
+                                        logging.error(f"Error processing message from {callsign}: {e}")
+                                        self.closesock(sck, inputs)
+                            else:
+                                #no data means client closed connection
+                                self.closesock(sck, inputs)
+                        except Exception as e:
+                            logging.error(f"Error receiving data: {e}")
+                            self.closesock(sck, inputs)
+
+                for sck in exceptional:
+                    self.closesock(sck, inputs)
+        except Exception as e:
+            logging.error(f'Select worker error: {e}')
+        self.finished.emit()
+
+    def closesock(self, sock, inputs):
+        if sock in inputs:
+            inputs.remove(sock)
+        if sock in self.connections:
+            callsign, _ = self.connections.pop(sock)
+            self.callsigntosock.pop(callsign, None)
+            self.signals.usersleft.emit(callsign)
+            self.signals.logmsgs.emit(f'Connection with {callsign} closed.')
+            logging.info(f'User {callsign} disconnected')
+        if sock in self.buffers:
+            del self.buffers[sock]
+        try:
+            sock.close()
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
