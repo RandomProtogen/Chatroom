@@ -4,6 +4,18 @@ from PySide6.QtGui import *
 from PySide6.QtCore import *
 import qdarktheme
 
+#todo
+#password and disbale/enable ask to join server
+#implement timeout fuction with nic
+#whisper functions
+#inactivity kick (we shall see)
+#image transmit or file transmit function
+#spam preventation
+#icons
+#json msgs's recv
+#coloured usernames
+#custom ban, kick, timeout messages
+
 class ClientSignals(QObject):
     userjoined = Signal(str, str)  #callsign, ip
     usersleft = Signal(str)
@@ -123,7 +135,7 @@ class ServerApp(QMainWindow):
         #logs that shit
         self.appendlog(f"Multithreading with maximum {self.threadcount} threads")
 
-    def browseconfig(self):  # this just gets up the file browser
+    def browseconfig(self):  #this just gets up the file browser
         options = QFileDialog.Options()
         filename, _ = QFileDialog.getOpenFileName(parent=self, caption="Select Config File", filter='JSON Files (*.json)', options=options)
         if filename:
@@ -174,7 +186,7 @@ class ServerApp(QMainWindow):
             self.ip = s.gethostbyname(s.gethostname()) #gets the public/private ip from your computer name
             self.server.bind((str(self.ip), int(self.port))) #binds the port and socket
             logging.info(f'Server Binding at {self.ip}:{self.port}') #logs it
-            self.logdisplay.append(f'[{datetime.datetime.now().strftime('%H:%M:%S')}] Server Binding at {self.ip}:{self.port}')
+            self.logdisplay.append(f'[{datetime.datetime.now().strftime("%H:%M:%S")}] Server Binding at {self.ip}:{self.port}')
             
             if not self.configinput.text():
                 self.usercap = 15
@@ -190,14 +202,14 @@ class ServerApp(QMainWindow):
             self.server.listen(self.usercap) #listens for set amount of conns
 
             if self.port == 42069 and not self.portinput.text(): #just a custom message if its default port
-                self.logdisplay.append(f'[{datetime.datetime.now().strftime('%H:%M:%S')}] User cap set to {self.usercap}.')
-                self.logdisplay.append(f'[{datetime.datetime.now().strftime('%H:%M:%S')}] No port was chosen. Listening on port {self.port}')
+                self.logdisplay.append(f'[{datetime.datetime.now().strftime("%H:%M:%S")}] User cap set to {self.usercap}.')
+                self.logdisplay.append(f'[{datetime.datetime.now().strftime("%H:%M:%S")}] No port was chosen. Listening on port {self.port}')
             else:
-                self.logdisplay.append(f'[{datetime.datetime.now().strftime('%H:%M:%S')}] User cap set to {self.usercap}. Listening on port {self.port}')
+                self.logdisplay.append(f'[{datetime.datetime.now().strftime("%H:%M:%S")}] User cap set to {self.usercap}. Listening on port {self.port}')
             logging.info(f'User cap set to {self.usercap}. Listening on port {self.port}')
 
             self.socketthr = QThread() #this is all to start the connection handlers
-            self.socketworker = SocketSelectWorker(self.server, self.connections, self.callsigntosock, self.signals, self.configinput)
+            self.socketworker = SocketSelectWorker(self.server, self.connections, self.callsigntosock, self.signals, self.configinput, self.usercap)
             self.socketworker.moveToThread(self.socketthr)
             self.socketthr.started.connect(self.socketworker.run)
             self.socketworker.finished.connect(self.socketthr.quit)
@@ -237,7 +249,7 @@ class ServerApp(QMainWindow):
                         pass
                 for user in self.connections:
                     try:
-                        self.removeuserrow(user)
+                        self.removeuserrow(user, action='kicked')
                     except Exception:
                         pass
                 self.connections.clear()
@@ -302,7 +314,7 @@ class ServerApp(QMainWindow):
         toolswidg.setLayout(toolslayout)
         self.usertable.setCellWidget(rowspos, 3, toolswidg)
 
-    def removeuserrow(self, callsign):
+    def removeuserrow(self, callsign, action='left'):
         for row in range(self.usertable.rowCount()):
             item = self.usertable.item(row, 0)
             if item and item.text() == callsign:
@@ -311,8 +323,15 @@ class ServerApp(QMainWindow):
 
         self.jointimemap.pop(callsign, None)
 
-        self.signals.logmsgs.emit(f'{callsign} has left!')
-        self.signals.msgreceived.emit(f'{callsign} has left!')
+        if action == 'kicked':
+            self.signals.logmsgs.emit(f'{callsign} has been kicked from the server.')
+            self.signals.msgreceived.emit(f'{callsign} has been kicked from the server.')
+        elif action == 'banned':
+            self.signals.logmsgs.emit(f'{callsign} has been banned from the server.')
+            self.signals.msgreceived.emit(f'{callsign} has been banned from the server.')
+        else:
+            self.signals.logmsgs.emit(f'{callsign} has left the server.')
+            self.signals.msgreceived.emit(f'{callsign} has left the server.')
 
     def updatetimer(self):
         now = datetime.datetime.now()
@@ -340,7 +359,7 @@ class ServerApp(QMainWindow):
                 logging.error(f'Error sending message to client: {e}')
                 self.disconnect(sock)
 
-    def disconnect(self, sock):
+    def disconnect(self, sock, reason=None):
         #safely disconnect and clean up a client socket
         if sock in self.connections:
             try:
@@ -349,9 +368,24 @@ class ServerApp(QMainWindow):
                 pass
             callsign, _ = self.connections.pop(sock)
             self.callsigntosock.pop(callsign, None)
-            self.signals.usersleft.emit(callsign)
-            self.signals.logmsgs.emit(f'Connection with {callsign} closed.')
-            logging.info(f'User {callsign} disconnected')
+
+            #emit usersleft and log message only if normal disconnect (no reason passed)
+            if reason is None:
+                self.signals.usersleft.emit(callsign)
+                self.signals.logmsgs.emit(f'{callsign} has left the server.')
+                logging.info(f'User {callsign} disconnected')
+            else:
+                #for 'kicked' or 'banned', do not emit usersleft signal again,
+                #as removeuserrow already emitted distinct messages
+                logging.info(f'User {callsign} disconnected due to {reason}')
+
+        self.signals.logmsgs.emit(f'Connection with {callsign} closed.')
+        try:
+            if sock in self.buffers:
+                del self.buffers[sock]
+        except Exception:
+            pass
+
 
     #admin tools placeholders
     def kick(self, row):
@@ -364,25 +398,71 @@ class ServerApp(QMainWindow):
                 logging.info(f'{callsign} has been kicked')
                 sock = self.callsigntosock.get(callsign)
                 if sock:
-                    self.disconnect(sock)
+                    try:
+                        sock.send('You have been kicked from the server.'.encode())
+                    except Exception:
+                        pass
+                    self.removeuserrow(callsign, action='kicked')  #emit kick message
+                    self.disconnect(sock, reason='kicked')  #disconnect with reason 'kicked'
 
     def ban(self, row):
         callsignitem = self.usertable.item(row, 0)
-        if callsignitem:
-            callsign = callsignitem.text()
-            self.appendlog(f'[ADMIN] Ban requested for user: {callsign}')
-            #ban logic to be implemented
+        if not callsignitem:
+            return
+        callsign = callsignitem.text()
+        reply = QMessageBox.question(self, 'Confirmation', f"Are you sure you want to ban {callsign}?\nNOTE: Ban will only work if you have a config file", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            iptoban = self.usertable.item(row, 1).text()
+            try:
+                if not self.configinput.text():
+                    self.appendlog(f'Unable to ban: Config file not present')
+                    logging.info(f'Unable to ban: Config file not present')
+                else:
+                    with open(self.configinput.text(), 'r+') as f:
+                        jsraw = f.read()
+                        jspars = json.loads(jsraw)
+                        if 'banlist' not in jspars:
+                            jspars['banlist'] = {'banned': []}
+                        if 'banned' not in jspars['banlist']:
+                            jspars['banlist']['banned'] = []
+                        if iptoban not in jspars['banlist']['banned']:
+                            jspars['banlist']['banned'].append(iptoban)
+                        f.seek(0)
+                        json.dump(jspars, f, indent=4)
+                        f.truncate()
+                        self.appendlog(f'{callsign} has been banned')
+                        logging.info(f'{callsign} has been banned')
+            except Exception as e:
+                logging.error(f"Failed to update banlist: {e}")
+            sock = self.callsigntosock.get(callsign)
+            if sock:
+                try:
+                    sock.send(f'You have been banned from {self.name}'.encode())
+                except Exception:
+                    pass
+                self.removeuserrow(callsign, action='banned')  #emit ban message
+                self.disconnect(sock, reason='banned')
 
     def naughtycorner(self, row):
         callsignitem = self.usertable.item(row, 0)
-        if callsignitem:
-            callsign = callsignitem.text()
-            self.appendlog(f'[ADMIN] Timeout requested for user: {callsign}')
-            #timeout logic to be implemented
+        if not callsignitem:
+            return
+        callsign = callsignitem.text()
+        timemins, ok = QInputDialog.getText(self, "Confirmation", f"How many minutes would you like to timeout {callsign}", text=f'5')
+        if not ok or not timemins.strip():
+            return
+        sock = self.callsigntosock.get(callsign)
+        if sock:
+            try:
+                sock.send(f'TIMEOUT {timemins}'.encode())
+            except Exception:
+                pass
+        self.appendlog(f'{callsign} timed out for {timemins} minutes')
+        #timeout logic to be implemented
 
 class SocketSelectWorker(QObject):
     finished = Signal()
-    def __init__(self, serversock, connections, callsigntosock, signals, config):
+    def __init__(self, serversock, connections, callsigntosock, signals, config, usercap):
         super().__init__()
         self.serversock = serversock
         self.connections = connections #socket -> (callsign, ip)
@@ -390,6 +470,7 @@ class SocketSelectWorker(QObject):
         self.signals = signals
         self.running = True
         self.configinput = config
+        self.usercap = usercap
         self.serversock.setblocking(False)
 
         self.buffers = {}  #socket -> bytearray buffer of received but incomplete data
@@ -405,9 +486,43 @@ class SocketSelectWorker(QObject):
                         try:
                             conn, addr = self.serversock.accept()
                             conn.setblocking(False)
+                            ip = addr[0]
+
+                            #load banlist fresh from config
+                            bannedips = set()
+                            if self.configinput and self.configinput.text():
+                                try:
+                                    with open(self.configinput.text(), 'r') as f:
+                                        jsraw = f.read()
+                                        jspars = json.loads(jsraw)
+                                        bannedips = set(jspars.get('banlist', {}).get('banned', []))
+                                except Exception as e:
+                                    logging.error(f"Error reading banlist from config: {e}")
+
+                            if ip in bannedips:
+                                try:
+                                    conn.send('You are banned from this server.'.encode())
+                                except Exception:
+                                    pass
+                                conn.close()
+                                self.signals.logmsgs.emit(f'Banned IP {ip} attempted to connect and was rejected.')
+                                logging.info(f'Banned IP {ip} attempted to connect and was rejected.')
+                                continue
+
+                            #check if user cap is reached
+                            if len(self.connections) >= self.usercap:
+                                try:
+                                    conn.send('User limit reached. Please try again later.'.encode())
+                                except Exception:
+                                    pass
+                                conn.close()
+                                self.signals.logmsgs.emit(f'Connection attempt from {ip} rejected due to user cap.')
+                                logging.info(f'Connection attempt from {ip} rejected due to user cap.')
+                                continue
+
                             inputs.append(conn)
                             self.buffers[conn] = bytearray()
-                            self.signals.logmsgs.emit(f'{addr[0]} has connected!')
+                            self.signals.logmsgs.emit(f'{ip} has connected!')
                         except Exception as e:
                             logging.error(f"Accept failed: {e}")
                     else:
@@ -493,7 +608,7 @@ class SocketSelectWorker(QObject):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    #app.setStyleSheet(qdarktheme.load_stylesheet())
+    app.setStyleSheet(qdarktheme.load_stylesheet())
     window = ServerApp()
     window.show()
     sys.exit(app.exec())
