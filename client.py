@@ -15,13 +15,21 @@ client based profanity filtering
 add image support (pls dear god no)
 """
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QSize, Qt, QThread
 from PySide6.QtGui import *
 from PySide6.QtWidgets import *
 from PySide6.QtCore import *
-import socket, _thread, sys, time, threading
+import _thread, sys, time, threading
+import socket as s
+
+# networking part
+
+
+
 
 # start of gui creation, oh boy
+
+
 
 class MainWindow(QMainWindow):
     
@@ -49,6 +57,7 @@ class MainWindow(QMainWindow):
         # User List widget
         userListMain = QVBoxLayout()
         userListTitle = QLabel("Users:") # creates the title
+        userListTitle.setStyleSheet("font-weight: bold; font-size: 16px;")
         userListMain.addWidget(userListTitle)
         self.userList = QTextEdit() #creates log text box
         self.userList.setReadOnly(True)
@@ -67,7 +76,7 @@ class MainWindow(QMainWindow):
         serverIPMain.addWidget(ipTitle)
         self.ipEntry = QLineEdit()
         serverIPMain.addWidget(self.ipEntry)
-        self.ipEntry.setText("127.0.0.1")
+        self.ipEntry.setText(s.gethostbyname("MQ-34-06"))
         infoColumnnew.addLayout(serverIPMain)
 
         # Port (pretty much copy and paste of IP)
@@ -76,6 +85,8 @@ class MainWindow(QMainWindow):
         portTitle = QLabel("Port: ")
         serverPortMain.addWidget(portTitle)
         self.portEntry = QLineEdit()
+        self.portEntry.setMaxLength(5)
+        self.portEntry.setValidator(QIntValidator(0,65535))
         serverPortMain.addWidget(self.portEntry)
         self.portEntry.setText("42069")
         infoColumnnew.addLayout(serverPortMain)
@@ -155,10 +166,15 @@ class MainWindow(QMainWindow):
 
     def connectToServer(self):
         print("test")
-        self.messagesdisplay.append("test")
-
         # also change button purpose to be disconnect
         if self.connected == False:
+            if len(self.usernameEntry.text()) <= 2 or len(self.usernameEntry.text()) >= 16:
+                self.messagesdisplay.append("Username must be no greater than 12 characters and at least 2 characters long")
+                return
+
+            elif self.establishConnection() == "error":
+                self.messagesdisplay.append("Server Not Found")
+                return
             self.connectButton.setText("Disconnect")
             self.connected = True
             self.ipEntry.setEnabled(False)
@@ -167,6 +183,8 @@ class MainWindow(QMainWindow):
             self.coloursOptions.setEnabled(False)
             self.messageEntry.setEnabled(True)
             self.sendButton.setEnabled(True)
+            self.establishConnection()
+            time.sleep(0.5)
         else:
             self.connectButton.setText("Connect")
             self.connected = False
@@ -176,6 +194,7 @@ class MainWindow(QMainWindow):
             self.coloursOptions.setEnabled(True)
             self.messageEntry.setEnabled(False)
             self.sendButton.setEnabled(False)
+            self.abandonConnection()
     
     def sendMessage(self):
         message = self.messageEntry.text()
@@ -200,13 +219,58 @@ class MainWindow(QMainWindow):
             }
             print("sent")
             # This is where the message will be then sent as a dictionary
-            self.messagesdisplay.append(f"<{self.messageinfo["username"]}> {self.messageinfo["message"]}") # change this to be parts of the json stuff
+            self.messagesdisplay.append(f"<{self.messageinfo['username']}> {self.messageinfo['message']}") # change this to be parts of the json stuff
             self.messageEntry.setText("")
 
-    def windowClosed(self, event: QCloseEvent):
-        print("window closed") # add ability to cleanly close connection when window closed
 
 
+    def closeEvent(self, event: QCloseEvent):
+        print("dead")
+        self.abandonConnection()
+
+
+    def establishConnection(self):
+        self.ip = str(self.ipEntry.text()) or "127.0.0.1"
+        self.port = int(self.portEntry.text()) or 42069
+        self.sock = s.socket(s.AF_INET, s.SOCK_STREAM) # creates an instance of socket, SOCK_STREAM makes it tcp/ip
+        try:
+            self.sock.connect((self.ip, self.port))
+        except WindowsError as e:
+            return "error"
+        
+
+        
+        '''
+        self.recvThread = threading.Thread(target=self.receiveThread, args=(self.sock,)) 
+        self.recvThread.start()
+
+        self.callsign = str(self.usernameEntry.text())
+        try:
+            self.sock.send(self.callsign.encode())
+        
+        except Exception as e:
+            print(e)
+            return "error"
+        '''
+
+
+    
+
+    def receiveThread(self, sock):
+        
+        while True:
+            try:
+                receivedMessage = sock.recv(4096).decode()
+                receivedMessage = receivedMessage.strip()
+                self.messagesdisplay.append(receivedMessage) # sends twice for some reason needs to be fixed
+                print(receivedMessage)
+            except Exception as e:
+                print("Error")
+                self.messagesdisplay.append(f"Error: {e}")
+                sock.close()
+    
+    def abandonConnection(self):
+        print("placeholder")
         
 
 
@@ -216,6 +280,35 @@ if __name__ == "__main__": # checks if this file is being run
     window.show() # actually shows the window wow
     
     app.exec()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 '''
 class ChatClient:
