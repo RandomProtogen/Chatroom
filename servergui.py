@@ -7,12 +7,12 @@ import qdarktheme
 #todo
 #password and disbale/enable ask to join server
 #implement timeout fuction with nic
-#whisper functions
+#whisper functions DONE MAYBE
 #inactivity kick (we shall see)
 #image transmit or file transmit function
-#spam preventation
+#spam preventation CLIENT SIDE
 #icons
-#json msgs's recv DONE MAYBE, TEST
+#json msgs's recv DONE MAYBE
 #coloured usernames
 #custom ban, kick, timeout messages
 
@@ -323,15 +323,15 @@ class ServerApp(QMainWindow):
 
         self.jointimemap.pop(callsign, None)
 
-        if action == 'kicked':
+        if action == 'kicked': #implement custom ban message aswell
             self.signals.logmsgs.emit(f'{callsign} has been kicked from the server.')
-            self.signals.msgreceived.emit(json.dumps({"type": "message", "username": "SERVER", "content": f'{callsign} has been kicked from the server.'}))
+            self.signals.msgreceived.emit(json.dumps({"type": "leave", "users": list(self.callsigntosock.keys()), "content": f'{callsign} has been kicked from the server.'}))
         elif action == 'banned':
             self.signals.logmsgs.emit(f'{callsign} has been banned from the server.')
-            self.signals.msgreceived.emit(json.dumps({"type": "message", "username": "SERVER", "content": f'{callsign} has been banned from the server.'}))
+            self.signals.msgreceived.emit(json.dumps({"type": "leave", "users": list(self.callsigntosock.keys()),"content": f'{callsign} has been banned from the server.'}))
         else:
             self.signals.logmsgs.emit(f'{callsign} has left the server.')
-            self.signals.msgreceived.emit(json.dumps({"type": "message", "username": "SERVER", "content": f'{callsign} has left the server.'}))
+            self.signals.msgreceived.emit(json.dumps({"type": "leave", "users": list(self.callsigntosock.keys()), "content": f'{callsign} has left the server.'}))
 
     def updatetimer(self):
         now = datetime.datetime.now()
@@ -543,8 +543,8 @@ class SocketSelectWorker(QObject):
                                             self.callsigntosock[callsign] = sck
                                             self.buffers[sck] = bytearray()  #clear buffer after callsign received
                                             self.signals.userjoined.emit(callsign, ip)
-                                            self.signals.logmsgs.emit(f'{callsign} has joined!')
-                                            self.signals.msgreceived.emit(json.dumps({"type": "message", "username": "SERVER", "content": f'{callsign} has joined!'}))
+                                            self.signals.logmsgs.emit(f'{callsign} has joined!') #implement custom join messages
+                                            self.signals.msgreceived.emit(json.dumps({"type": "join", "users": list(self.callsigntosock.keys()), "content": f'{callsign} has joined!'}))
                                             logging.info(f'{callsign} has joined!')
                                             if not self.configinput.text():
                                                 welcomemsg = f"Welcome to our humble chatroom {callsign}!"
@@ -558,7 +558,7 @@ class SocketSelectWorker(QObject):
                                                     logging.error("Error reading config file, using default welcome message")
                                                     welcomemsg = f"Welcome to our humble chatroom {callsign}!"
                                                     
-                                            sck.send(json.dumps({"type": "welcome", "msg": str(welcomemsg), "users": [list(self.callsigntosock.keys())]}).encode())
+                                            sck.send(json.dumps({"type": "welcome", "msg": str(welcomemsg), "users": [self.callsigntosock.keys()]}).encode())
                                     except Exception as ex:
                                         logging.error(f"Error reading callsign: {ex}")
                                         self.closesock(sck, inputs)
