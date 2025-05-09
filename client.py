@@ -13,6 +13,11 @@ connect to server
 spam limit
 client based profanity filtering
 add image support (pls dear god no)
+
+
+
+
+
 """
 
 from PySide6.QtCore import QSize, Qt, QThread
@@ -183,8 +188,7 @@ class MainWindow(QMainWindow):
             self.coloursOptions.setEnabled(False)
             self.messageEntry.setEnabled(True)
             self.sendButton.setEnabled(True)
-            self.establishConnection()
-            time.sleep(0.5)
+            
         else:
             self.connectButton.setText("Connect")
             self.connected = False
@@ -198,10 +202,8 @@ class MainWindow(QMainWindow):
     
     def sendMessage(self):
         message = self.messageEntry.text()
-        if self.usernameEntry.text() == "":
-            self.messagesdisplay.append("<Please enter a Username>")
-            return
-        elif self.messageEntry.text() == "":
+
+        if self.messageEntry.text() == "":
             return
         elif message[0] == "/":
             self.messageEntry.setText("")
@@ -215,7 +217,8 @@ class MainWindow(QMainWindow):
             self.messageinfo = {
                 "type": "message",
                 "username": self.usernameEntry.text(),
-                "message": message
+                "content": message,
+                "colour": "" # placeholder might add or remove
             }
             print("sent")
             # This is where the message will be then sent as a dictionary
@@ -227,20 +230,22 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent):
         print("dead")
         self.abandonConnection()
+        if self.connected():
+            self.sock.close()
 
 
     def establishConnection(self):
         self.ip = str(self.ipEntry.text()) or "127.0.0.1"
         self.port = int(self.portEntry.text()) or 42069
+        self.callsign = self.usernameEntry.text() or "placeholder"
         self.sock = s.socket(s.AF_INET, s.SOCK_STREAM) # creates an instance of socket, SOCK_STREAM makes it tcp/ip
         try:
             self.sock.connect((self.ip, self.port))
+            self.sock.send(self.callsign.encode())
         except WindowsError as e:
             return "error"
         
-
         
-        '''
         self.recvThread = threading.Thread(target=self.receiveThread, args=(self.sock,)) 
         self.recvThread.start()
 
@@ -251,9 +256,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(e)
             return "error"
-        '''
-
-
     
 
     def receiveThread(self, sock):
@@ -262,8 +264,12 @@ class MainWindow(QMainWindow):
             try:
                 receivedMessage = sock.recv(4096).decode()
                 receivedMessage = receivedMessage.strip()
-                self.messagesdisplay.append(receivedMessage) # sends twice for some reason needs to be fixed
+                if receivedMessage["type"] == "timeout":
+                    
+                self.messagesdisplay.append(receivedMessage) 
                 print(receivedMessage)
+            except WindowsError:
+                self.messagesdisplay.append("Server has closed")
             except Exception as e:
                 print("Error")
                 self.messagesdisplay.append(f"Error: {e}")
@@ -284,188 +290,3 @@ if __name__ == "__main__": # checks if this file is being run
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-'''
-class ChatClient:
-    def __init__(self, host, port):
-        self.server_address = (host, port)
-        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.username = None
-        self.is_running = True
-
-    def connect(self):
-        try:
-            self.client_socket.connect(self.server_address)
-            print("Connected to the server.")
-            self.username = input("Enter your username: ")
-            self.client_socket.send(self.username.encode())
-            print("Welcome to the chatroom!")
-            threading.Thread(target=self.receive_messages, daemon=True).start()
-            self.send_messages()
-        except Exception as e:
-            print(f"Error connecting to server: {e}")
-            self.client_socket.close()
-
-    def receive_messages(self):
-        while self.is_running:
-            try:
-                message = self.client_socket.recv(2048).decode()
-                if message:
-                    print(message)
-                else:
-                    print("Disconnected from server.")
-                    self.is_running = False
-                    self.client_socket.close()
-            except Exception as e:
-                print(f"Error receiving message: {e}")
-                self.is_running = False
-                self.client_socket.close()
-
-    def send_messages(self):
-        while self.is_running:
-            message = input()
-            if message.lower() == 'exit':
-                self.is_running = False
-                self.client_socket.close()
-                print("Disconnected from the chat.")
-                break
-            self.client_socket.send(message.encode())
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = QWidget()
-    window.show()
-    app.exec()
-
-    
-    
-    host = socket.gethostbyname(socket.gethostname())
-    port = int(input("Enter server port (default 42069): ") or 42069)
-    
-    client = ChatClient(host, port)
-    client.connect()
-
-'''
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-'''
-def receive_messages(sock):
-    while True:
-        try:
-            msg = sock.recv(2048).decode()
-            if not msg:
-                print("Connection closed by the server.")
-                break
-            print(msg)
-        except Exception as e:
-            print(f"Error receiving message: {e}")
-            break
-
-def main():
-    server_ip = input("Enter server IP address: ")#socket.gethostbyname(socket.gethostname())
-    server_port = input("Enter port: ")
-    
-    try:
-        server_port = int(server_port)
-    except ValueError:
-        print("Port must be an integer.")
-        return
-
-    callsign = input("Enter your username: ")
-    if callsign == "":
-        print("Please enter a username:")
-        return
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        sock.connect((server_ip, server_port))
-        print(f"Connected to server at {server_ip}:{server_port}")
-    except Exception as e:
-        print(f"Failed to connect: {e}")
-        return
-
-    # Send the callsign to the server
-    sock.send(callsign.encode())
-
-    # Receive welcome message
-    try:
-        welcome = sock.recv(2048).decode()
-        print(welcome)
-    except Exception as e:
-        print(f"Error receiving welcome message: {e}")
-        sock.close()
-        return
-
-    # Start thread to listen for messages from server
-    receive_thread = threading.Thread(target=receive_messages, args=(sock,), daemon=True)
-    receive_thread.start()
-
-    # Main loop to send messages
-    try:
-        while True:
-            msg = input()
-            if msg.lower() == "/quit":
-                print("Disconnecting...")
-                break
-            if msg.strip() == "":
-                continue
-            sock.send(msg.encode())
-    except KeyboardInterrupt:
-        print("\nDisconnecting...")
-
-    sock.close()
-
-if __name__ == "__main__":
-    main()
-'''
