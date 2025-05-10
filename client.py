@@ -262,12 +262,18 @@ class MainWindow(QMainWindow):
         
         while True:
             try:
-                receivedMessage = sock.recv(4096).decode()
-                receivedMessage = receivedMessage.strip()
+                receivedMessagejson = sock.recv(4096).decode()
+                receivedMessage = json.load(receivedMessagejson)
+                #receivedMessage = receivedMessage.strip()
                 if receivedMessage["type"] == "timeout":
                     
                 self.messagesdisplay.append(receivedMessage) 
                 print(receivedMessage)
+                
+                elif receivedMessage["type"] == "welcome":
+                    for i in receivedMessage["users"]:
+                        self.userList.append(i)
+                
             except WindowsError:
                 self.messagesdisplay.append("Server has closed")
             except Exception as e:
