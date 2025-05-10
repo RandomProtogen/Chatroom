@@ -24,7 +24,7 @@ from PySide6.QtCore import QSize, Qt, QThread
 from PySide6.QtGui import *
 from PySide6.QtWidgets import *
 from PySide6.QtCore import *
-import _thread, sys, time, threading
+import _thread, sys, time, threading, json
 import socket as s
 
 # networking part
