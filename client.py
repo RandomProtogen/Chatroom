@@ -66,7 +66,6 @@ class MainWindow(QMainWindow):
         userListMain.addWidget(userListTitle)
         self.userList = QTextEdit() #creates log text box
         self.userList.setReadOnly(True)
-        #self.userList = QLabel("User1\nUser2\nStupid Idiot mf udawgduahiodwjhaodjhwaoidjwaoidwa") # creates a larger text box 
         # User list should update when users change
 
         userListMain.addWidget(self.userList)
@@ -81,7 +80,7 @@ class MainWindow(QMainWindow):
         serverIPMain.addWidget(ipTitle)
         self.ipEntry = QLineEdit()
         serverIPMain.addWidget(self.ipEntry)
-        self.ipEntry.setText(s.gethostbyname("MQ-34-06"))
+        self.ipEntry.setText("127.0.0.1")
         infoColumnnew.addLayout(serverIPMain)
 
         # Port (pretty much copy and paste of IP)
@@ -120,7 +119,12 @@ class MainWindow(QMainWindow):
         self.connectButton.clicked.connect(self.connectToServer)
         infoColumnnew.addWidget(self.connectButton)
 
-
+        # Sample button for testing purposes
+        '''
+        self.testButton = QPushButton("Test")
+        self.testButton.clicked.connect(self.setText)
+        '''
+        
 
         # Messages area
         self.messagesdisplay = QTextEdit() #creates log text box
@@ -132,11 +136,11 @@ class MainWindow(QMainWindow):
         self.messageEntry = QLineEdit()
         self.messageEntry.setPlaceholderText('Enter Message')
         self.messageEntry.returnPressed.connect(self.sendMessage)
-        self.messageEntry.setEnabled(False)
+        self.messageEntry.setEnabled(True)
         messageEntryMain.addWidget(self.messageEntry)
         self.sendButton = QPushButton("Send")
         self.sendButton.clicked.connect(self.sendMessage)
-        self.sendButton.setEnabled(False)
+        self.sendButton.setEnabled(True)
         messageEntryMain.addWidget(self.sendButton)
         messageColumn.addLayout(messageEntryMain, 1, 0)
 
@@ -161,6 +165,13 @@ class MainWindow(QMainWindow):
         centralWidget.setLayout(mainlayoutnew)
         #centralWidget.setLayout(mainlayout)
         self.setCentralWidget(centralWidget)
+
+    def setText(self):
+        users = self.userList.toPlainText()
+        users = users.replace("Ian", "")
+        users = users.replace("\n\n","\n")
+        print(users)
+        self.userList.setText(f"{users}\n")
 
 
     def usersChanged(self):
@@ -213,16 +224,10 @@ class MainWindow(QMainWindow):
                 self.messagesdisplay.append(f"'{message}' not found")
 
         else:
-            
-            self.messageinfo = {
-                "type": "message",
-                "username": self.usernameEntry.text(),
-                "content": message,
-                "colour": "" # placeholder might add or remove
-            }
             print("sent")
             # This is where the message will be then sent as a dictionary
-            self.messagesdisplay.append(f"<{self.messageinfo['username']}> {self.messageinfo['message']}") # change this to be parts of the json stuff
+            self.sock.send(json.dumps({"type": "message", "username": self.usernameEntry.text(), "content": message, "colour": ""}).encode())
+            #self.messagesdisplay.append(f"<{self.messageinfo['username']}> {self.messageinfo['content']}") # change this to be parts of the json stuff
             self.messageEntry.setText("")
 
 
@@ -230,18 +235,20 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent):
         print("dead")
         self.abandonConnection()
-        if self.connected():
+        if self.connected:
+            print("you stupid idiot mf")
             self.sock.close()
 
 
     def establishConnection(self):
         self.ip = str(self.ipEntry.text()) or "127.0.0.1"
         self.port = int(self.portEntry.text()) or 42069
-        self.callsign = self.usernameEntry.text() or "placeholder"
+        self.username = self.usernameEntry.text() or "placeholder"
         self.sock = s.socket(s.AF_INET, s.SOCK_STREAM) # creates an instance of socket, SOCK_STREAM makes it tcp/ip
         try:
             self.sock.connect((self.ip, self.port))
-            self.sock.send(self.callsign.encode())
+            # self.sock.send(json.dumps({"type":"join", "username":self.username}).encode())  FOR WHEN IAN UPDATES THIS
+            self.sock.send(self.username.encode())
         except WindowsError as e:
             return "error"
         
@@ -265,24 +272,76 @@ class MainWindow(QMainWindow):
                 receivedMessagejson = sock.recv(4096).decode()
                 receivedMessage = json.load(receivedMessagejson)
                 #receivedMessage = receivedMessage.strip()
-                if receivedMessage["type"] == "timeout":
-                    
-                self.messagesdisplay.append(receivedMessage) 
-                print(receivedMessage)
-                
-                elif receivedMessage["type"] == "welcome":
-                    for i in receivedMessage["users"]:
-                        self.userList.append(i)
                 
             except WindowsError:
                 self.messagesdisplay.append("Server has closed")
+                
             except Exception as e:
                 print("Error")
                 self.messagesdisplay.append(f"Error: {e}")
+                print("you stupid idiot mf 2")
+                time.sleep(1)
                 sock.close()
+            
+            try:
+                if receivedMessage["type"] == "timeout":
+                    self.messagesdisplay.append(receivedMessage["content"])
+                    self.timeoutThread = threading.Thread(target=self.timeout)
+                    self.timeoutThread.start()
+
+                elif receivedMessage["type"] == "welcome":
+                    userListString = "" 
+                    for i in receivedMessage["users"]:
+                        userListString = userListString+"\n"+i
+                    self.userList.setText(userListString)
+                    self.messagesdisplay.append(receivedMessage["content"])
+                
+                elif receivedMessage["type"] == "kick":
+                    self.messagesdisplay.append()
+                    self.messagesdisplay.append(receivedMessage["content"])
+                    
+
+                elif receivedMessage["type"] == "join":
+                    self.userList.append(receivedMessage["user"])
+                    self.messagesdisplay.append(receivedMessage["content"])
+                
+                elif receivedMessage["type"] == "leave":
+                    users = self.userList.toPlainText()
+                    users.replace(f"\n{receivedMessage["user"]}", "")
+                    users = users.replace("\n\n","\n") # removes whitespace .strip() didnt work for some reason
+                    self.userList.setText(f"{users}\n")
+
+                    self.messagesdisplay.append(receivedMessage["content"])
+
+
+                elif receivedMessage["type"] == "message":
+                    self.messagesdisplay.append(f"<{receivedMessage["user"]} {receivedMessage["content"]}")
+                
+                elif receivedMessage["type"] == "whisper":
+                    self.messagesdisplay.append(f"<i>{receivedMessage["user"]} whispers to you: {receivedMessage["content"]}")
+
+            
+            except:
+                try:
+                    self.messagesdisplay.append(receivedMessage)
+                except:
+                    self.messagesdisplay.append("Error receiving message.")
     
+    def timeout(self, minutes):
+        self.messageEntry.setEnabled(False)
+        self.sendButton.setEnabled(False)
+        try:
+            time.sleep(int(minutes)*60) # minutes are given by the server but time.sleep works in seconds so it needs to be multiplied by 60
+        except:
+            self.messagesdisplay.append("huh there was an error timing you out, funny that")
+        self.messageEntry.setEnabled(True)
+        self.sendButton.setEnabled(True)
+
+
     def abandonConnection(self):
-        print("placeholder")
+        print()
+        #self.sock.close()
+
         
 
 
@@ -292,7 +351,6 @@ if __name__ == "__main__": # checks if this file is being run
     window.show() # actually shows the window wow
     
     app.exec()
-
 
 
 
