@@ -41,7 +41,7 @@ class MainWindow(QMainWindow):
     
     def __init__(self): # when initialised
         super().__init__() # it was in the tutorial -_- canon event fr
-        
+        self.receivedMessage = {}
         self.setWindowTitle("Rizzcord for Nerds") # Sets window title
         self.setMinimumSize(1200,600)
 
@@ -251,6 +251,7 @@ class MainWindow(QMainWindow):
             # self.sock.send(json.dumps({"type":"join", "username":self.username}).encode())  FOR WHEN IAN UPDATES THIS
             self.sock.send(self.username.encode())
         except WindowsError as e:
+            print(e)
             return "error"
         
         
@@ -258,74 +259,78 @@ class MainWindow(QMainWindow):
         self.recvThread.start()
 
         self.callsign = str(self.usernameEntry.text())
-        try:
-            self.sock.send(self.callsign.encode())
-        
-        except Exception as e:
-            print(e)
-            return "error"
     
 
     def receiveThread(self, sock):
         
         while True:
+            
             try:
                 receivedMessagejson = sock.recv(4096).decode()
-                receivedMessage = json.load(receivedMessagejson)
-                #receivedMessage = receivedMessage.strip()
+                self.receivedMessage = json.loads(receivedMessagejson)
+                print("Raw Input:", self.receivedMessage)
+                #self.receivedMessage = self.receivedMessage.strip()
                 
             except WindowsError:
                 self.messagesdisplay.append("Server has closed")
                 
             except Exception as e:
                 print("Error")
+                print(e)
                 self.messagesdisplay.append(f"Error: {e}")
                 print("you stupid idiot mf 2")
                 time.sleep(1)
                 sock.close()
             
             try:
-                if receivedMessage["type"] == "timeout":
-                    self.messagesdisplay.append(receivedMessage["content"])
+                if not isinstance(self.receivedMessage, dict) or "type" not in self.receivedMessage:
+                    self.messagesdisplay.append("Error receiving message from server")
+                    print("Error Receiving:", self.receivedMessage)
+                    continue
+                elif self.receivedMessage.get("type") == "timeout":
+                    self.messagesdisplay.append(self.receivedMessage.get("content"))
                     self.timeoutThread = threading.Thread(target=self.timeout)
                     self.timeoutThread.start()
 
-                elif receivedMessage["type"] == "welcome":
+                elif self.receivedMessage.get("type") == "welcome":
                     userListString = "" 
-                    for i in receivedMessage["users"]:
+                    for i in self.receivedMessage.get("users"):
                         userListString = userListString+"\n"+i
                     self.userList.setText(userListString)
-                    self.messagesdisplay.append(receivedMessage["content"])
+                    self.messagesdisplay.append(self.receivedMessage.get("content"))
                 
-                elif receivedMessage["type"] == "kick":
+                elif self.receivedMessage.get("type") == "kick":
                     self.messagesdisplay.append()
-                    self.messagesdisplay.append(receivedMessage["content"])
+                    self.messagesdisplay.append(self.receivedMessage.get("content"))
                     
 
-                elif receivedMessage["type"] == "join":
-                    self.userList.append(receivedMessage["user"])
-                    self.messagesdisplay.append(receivedMessage["content"])
+                elif self.receivedMessage.get("type") == "join":
+                    self.userList.append(self.receivedMessage.get("user"))
+                    self.messagesdisplay.append(self.receivedMessage.get("content"))
                 
-                elif receivedMessage["type"] == "leave":
+                elif self.receivedMessage.get("type") == "leave":
                     users = self.userList.toPlainText()
-                    users.replace(f"\n{receivedMessage["user"]}", "")
+                    users.replace(f"\n{self.receivedMessage.get("user")}", "")
                     users = users.replace("\n\n","\n") # removes whitespace .strip() didnt work for some reason
                     self.userList.setText(f"{users}\n")
 
-                    self.messagesdisplay.append(receivedMessage["content"])
+                    self.messagesdisplay.append(self.receivedMessage.get("content"))
 
 
-                elif receivedMessage["type"] == "message":
-                    self.messagesdisplay.append(f"<{receivedMessage["user"]} {receivedMessage["content"]}")
+                elif self.receivedMessage.get("type") == "message":
+                    self.messagesdisplay.append(f"<{self.receivedMessage.get("user")} {self.receivedMessage.get("content")}")
                 
-                elif receivedMessage["type"] == "whisper":
-                    self.messagesdisplay.append(f"<i>{receivedMessage["user"]} whispers to you: {receivedMessage["content"]}")
+                elif self.receivedMessage.get("type") == "whisper":
+                    self.messagesdisplay.append(f"<i>{self.receivedMessage.get("user")} whispers to you: {self.receivedMessage.get("content")}")
 
             
-            except:
+            except Exception as e:
+                print(e)
                 try:
-                    self.messagesdisplay.append(receivedMessage)
-                except:
+                    #self.messagesdisplay.append(self.receivedMessage)
+                    print()
+                except Exception as e:
+                    print(e)
                     self.messagesdisplay.append("Error receiving message.")
     
     def timeout(self, minutes):
@@ -355,3 +360,45 @@ if __name__ == "__main__": # checks if this file is being run
 
 
 
+"""
+stuff to test:
+
+Buffer in receive thread:
+
+
+
+def receiveThread(self, sock):
+    buffer = ""
+    while True:
+        try:
+            data = sock.recv(4096).decode()
+            if not data:
+                self.messagesdisplay.append("Server closed the connection.")
+                break
+
+            buffer += data
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                if not line.strip():
+                    continue
+                try:
+                    self.receivedMessage = json.loads(line)
+                    print("Raw Input:", self.receivedMessage)
+                except json.JSONDecodeError as e:
+                    print("JSON decode error:", e)
+                    continue
+
+                if not isinstance(self.receivedMessage, dict) or "type" not in self.receivedMessage:
+                    self.messagesdisplay.append("Error receiving message from server")
+                    continue
+
+                # Handle the message here as before...
+                # e.g., self.messagesdisplay.append(self.receivedMessage.get('content'))
+
+        except Exception as e:
+            print("Receive thread error:", e)
+            self.messagesdisplay.append(f"Error: {e}")
+            sock.close()
+            break
+
+"""
