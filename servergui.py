@@ -548,6 +548,7 @@ class SocketSelectWorker(QObject):
                                             self.signals.userjoined.emit(callsign, ip)
                                             self.signals.logmsgs.emit(f'{callsign} has joined!') #implement custom join messages
                                             self.signals.msgreceived.emit(json.dumps({"type": "join", "users": list(self.callsigntosock.keys()), "content": f"{callsign} has joined!"}))
+                                            print(list(self.callsigntosock.keys()))
                                             logging.info(f'{callsign} has joined!')
                                             if not self.configinput.text():
                                                 welcomemsg = f"Welcome to our humble chatroom {callsign}!"
@@ -576,14 +577,14 @@ class SocketSelectWorker(QObject):
                                         if msgtext:
                                             if msgtextjs['type'] == "message":
                                                 #msg = f'<{callsign}> {msgtext}'
-                                                self.signals.logmsgs.emit(f'<{msgtextjs['username']}> {msgtextjs['content']}')
+                                                self.signals.logmsgs.emit(f'<{msgtextjs["username"]}> {msgtextjs["content"]}')
                                                 self.signals.msgreceived.emit(msgtext)
                                                 logging.info(f'Message from {msgtextjs["username"]}: {msgtextjs["content"]}')
                                                 #clear buffer after processing message
                                                 self.buffers[sck] = bytearray()
                                             elif msgtextjs['type'] == "whisper":
-                                                self.signals.logmsgs.emit(f'<{msgtextjs['username']}> whispered to <{msgtextjs['to']}> {msgtextjs['content']}')
-                                                logging.info(f'<{msgtextjs['username']}> whispered to <{msgtextjs['to']}> {msgtextjs['content']}')
+                                                self.signals.logmsgs.emit(f'<{msgtextjs["username"]}> whispered to <{msgtextjs["to"]}> {msgtextjs["content"]}')
+                                                logging.info(f'<{msgtextjs["username"]}> whispered to <{msgtextjs["to"]}> {msgtextjs["content"]}')
                                                 recepient = self.callsigntosock.get(str(msgtextjs["to"]))
                                                 recepient.send(msgtext.encode())
                                                 self.buffers[sck] = bytearray()
@@ -621,7 +622,7 @@ class SocketSelectWorker(QObject):
             pass
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
+    app = QApplication([])
     #app.setStyleSheet(qdarktheme.load_stylesheet())
     window = ServerApp()
     window.show()
