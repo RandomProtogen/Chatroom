@@ -105,6 +105,8 @@ class MainWindow(QMainWindow):
         usernameMain.addWidget(usernameTitle)
         self.usernameEntry = QLineEdit()
         usernameMain.addWidget(self.usernameEntry)
+        self.usernameEntry.setPlaceholderText("Enter a username (2-16 characters)")
+        self.usernameEntry.setMaxLength(16)
         infoColumnnew.addLayout(usernameMain)
 
         # Colour, unfortunately can't be included
@@ -171,11 +173,6 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(centralWidget)
 
 
-    def usersChanged(self):
-        
-        # get the user list from server OR have a variable that gets updated when user join/leave
-        self.userList.setText("data from server")
-
 
     def serverConnection(self):
         print("test")
@@ -227,7 +224,7 @@ class MainWindow(QMainWindow):
             if message == "/help":
                 self.messagesdisplay.append("Commands are:\n/help - Brings up this list\n/whisper or /w - privately message a user\n/clear - Clears the message log\n/profanity add/remove/toggle - Adds to or removes from the profanity or toggles it on or off\n/disconnect - If you can't manage to find the button yourself")
             
-            elif message == "/whisper" or "/w":
+            elif message in ["/whisper", "/w"]:
                 self.sock.send(json.dumps({"type": "whisper", "to": "", "content": ""}))
 
             else:
@@ -304,6 +301,7 @@ class MainWindow(QMainWindow):
                 print("you stupid idiot mf 2")
                 time.sleep(1)
                 sock.close()
+                break
             
             try:
                 if not isinstance(self.receivedMessage, dict) or "type" not in self.receivedMessage:
@@ -319,7 +317,7 @@ class MainWindow(QMainWindow):
 
                 elif self.receivedMessage.get("type") == "timeout":
                     self.messagesdisplay.append(self.receivedMessage.get("content"))
-                    self.timeoutThread = threading.Thread(target=self.timeout)
+                    self.timeoutThread = threading.Thread(target=self.timeout, args=self.receivedMessage.get("time")
                     self.timeoutThread.start()
 
                 elif self.receivedMessage.get("type") == "welcome":
@@ -335,7 +333,6 @@ class MainWindow(QMainWindow):
                     self.messagesdisplay.append(self.receivedMessage.get("content"))
                 
                 elif self.receivedMessage.get("type") == "kick":
-                    self.messagesdisplay.append()
                     self.messagesdisplay.append(self.receivedMessage.get("content"))
                     
 
@@ -397,3 +394,91 @@ if __name__ == "__main__": # checks if this file is being run
     window.show() # actually shows the window wow
     
     app.exec()
+
+
+
+"""
+George Papas Tom:
+
+1)
+from PySide6.QtCore import Signal
+
+class MainWindow(QMainWindow):
+    messageReceived = Signal(str)
+    userJoined = Signal(str)
+    userLeft = Signal(str)
+    resetUserListSignal = Signal()
+
+2)
+(still in main class)
+def __init__(self):
+    self.messageReceived.connect(self.messagesdisplay.append)
+    self.userJoined.connect(self.addUserRow)
+    self.userLeft.connect(self.removeUserRow)
+    self.resetUserListSignal.connect(self.resetUserList)
+
+3)
+in receive thread:
+self.messageReceived.emit(self.receivedMessage.get("content"))
+self.userJoined.emit(username)
+self.userLeft.emit(username)
+
+Example of recvthread:
+def receiveThread(self, sock):
+    while self.connected:
+        try:
+            data = sock.recv(4096).decode()
+            if not data:
+                break
+
+            self.receivedMessage = json.loads(data)
+
+            msg_type = self.receivedMessage.get("type")
+
+            if not msg_type:
+                self.messageReceived.emit("Error receiving message from server")
+                continue
+
+            if msg_type == "timeout":
+                self.messageReceived.emit(self.receivedMessage.get("content"))
+                self.timeoutThread = threading.Thread(
+                    target=self.timeout, 
+                    args=(self.receivedMessage.get("minutes", 1),)
+                )
+                self.timeoutThread.start()
+
+            elif msg_type == "welcome":
+                self.messageReceived.emit(self.receivedMessage.get("content"))
+
+            elif msg_type == "join":
+                users = self.receivedMessage.get("users", [])
+                for user in users:
+                    self.userJoined.emit(user)
+                self.messageReceived.emit(self.receivedMessage.get("content"))
+
+            elif msg_type == "kick":
+                self.messageReceived.emit(self.receivedMessage.get("content"))
+
+            elif msg_type == "leave":
+                self.userLeft.emit(self.receivedMessage.get("users"))
+                self.messageReceived.emit(self.receivedMessage.get("content"))
+
+            elif msg_type == "message":
+                username = self.receivedMessage.get("username")
+                content = self.receivedMessage.get("content")
+                self.messageReceived.emit(f"<{username}> {content}")
+
+        except (ConnectionResetError, json.JSONDecodeError) as e:
+            self.messageReceived.emit(f"Connection error: {e}")
+            break
+
+        except Exception as e:
+            self.messageReceived.emit(f"Unexpected error: {e}")
+            break
+
+    self.connected = False
+    sock.close()
+    self.messageReceived.emit("Disconnected from server.")
+    self.resetUserListSignal.emit()
+
+"""
