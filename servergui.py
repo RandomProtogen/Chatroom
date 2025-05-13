@@ -2,7 +2,7 @@ import sys, datetime, logging, socket as s, select, json
 from PySide6.QtWidgets import *
 from PySide6.QtGui import *
 from PySide6.QtCore import *
-import qdarktheme
+#import qdarktheme
 
 #todo
 #password and disbale/enable ask to join server
