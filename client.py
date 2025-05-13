@@ -120,7 +120,7 @@ class MainWindow(QMainWindow):
         # Connect
         self.connected = False
         self.connectButton = QPushButton("Connect")
-        self.connectButton.clicked.connect(self.connectToServer)
+        self.connectButton.clicked.connect(self.serverConnection)
         infoColumnnew.addWidget(self.connectButton)
 
         # Sample button for testing purposes
@@ -140,11 +140,11 @@ class MainWindow(QMainWindow):
         self.messageEntry = QLineEdit()
         self.messageEntry.setPlaceholderText('Enter Message')
         self.messageEntry.returnPressed.connect(self.sendMessage)
-        self.messageEntry.setEnabled(True)
+        self.messageEntry.setEnabled(False)
         messageEntryMain.addWidget(self.messageEntry)
         self.sendButton = QPushButton("Send")
         self.sendButton.clicked.connect(self.sendMessage)
-        self.sendButton.setEnabled(True)
+        self.sendButton.setEnabled(False)
         messageEntryMain.addWidget(self.sendButton)
         messageColumn.addLayout(messageEntryMain, 1, 0)
 
@@ -177,28 +177,30 @@ class MainWindow(QMainWindow):
         self.userList.setText("data from server")
 
 
-    def connectToServer(self):
+    def serverConnection(self):
         print("test")
         # also change button purpose to be disconnect
         if self.connected == False:
+            self.connected = True
             if len(self.usernameEntry.text()) <= 2 or len(self.usernameEntry.text()) >= 16:
                 self.messagesdisplay.append("Username must be no greater than 12 characters and at least 2 characters long")
+                self.connected = False
                 return
 
             elif self.establishConnection() == "error":
                 self.messagesdisplay.append("Server Not Found")
+                self.connected = False
                 return
             self.connectButton.setText("Disconnect")
-            self.connected = True
             self.ipEntry.setEnabled(False)
             self.portEntry.setEnabled(False)
             self.usernameEntry.setEnabled(False)
             self.messageEntry.setEnabled(True)
             self.sendButton.setEnabled(True)
             
+            
         else:
             self.connectButton.setText("Connect")
-            self.connected = False
             self.ipEntry.setEnabled(True)
             self.portEntry.setEnabled(True)
             self.usernameEntry.setEnabled(True)
@@ -208,7 +210,12 @@ class MainWindow(QMainWindow):
     
     
     def resetUserList(self):
-        self.messagesdisplay.setPlainText("")
+        try:
+            count = self.userList.rowCount()
+            for row in range(count):
+                self.userList.removeRow(row)
+        except Exception as e:
+            print("Error: ", e)
 
     def sendMessage(self):
         message = self.messageEntry.text()
@@ -260,9 +267,10 @@ class MainWindow(QMainWindow):
         self.callsign = str(self.usernameEntry.text())
 
     def addUserRow(self, user):
-        position = self.userList.rowCount()
-        self.userList.insertRow(int(position))
-        self.userList.setItem(int(position), 0, QTableWidgetItem(user))
+        if self.connected:
+            position = self.userList.rowCount()
+            self.userList.insertRow(int(position))
+            self.userList.setItem(int(position), 0, QTableWidgetItem(user))
     
     def removeUserRow(self, user):
         count = self.userList.rowCount()
@@ -276,6 +284,8 @@ class MainWindow(QMainWindow):
 
         while self.connected:
             self.users = []
+            receivedMessagejson = None
+            self.receivedMessage = {}
             try:
                 receivedMessagejson = sock.recv(4096).decode()
                 self.receivedMessage = json.loads(receivedMessagejson)
@@ -284,6 +294,7 @@ class MainWindow(QMainWindow):
                 
             except WindowsError:
                 if self.connected:
+
                     self.messagesdisplay.append("Server has closed")
                 
             except Exception as e:
@@ -299,6 +310,13 @@ class MainWindow(QMainWindow):
                     self.messagesdisplay.append("Error receiving message from server")
                     print("Error Receiving:", self.receivedMessage)
                     continue
+                
+                elif self.connected == False: # This is a failsafe
+                    self.receivedMessage = {}
+                    self.abandonConnection()
+                    self.resetUserList()
+                    break
+
                 elif self.receivedMessage.get("type") == "timeout":
                     self.messagesdisplay.append(self.receivedMessage.get("content"))
                     self.timeoutThread = threading.Thread(target=self.timeout)
@@ -308,7 +326,6 @@ class MainWindow(QMainWindow):
                     self.messagesdisplay.append(self.receivedMessage.get("content"))
 
                 elif self.receivedMessage.get("type") == "join":
-                    userListString = []
                     for i in self.receivedMessage.get("users"):
                         print("User:", i)
                         self.addUserRow(i)
@@ -324,10 +341,9 @@ class MainWindow(QMainWindow):
 
                 
                 elif self.receivedMessage.get("type") == "leave":
-                    self.removeUserRow(self.receivedMessage.get('users'))
-                    print(self.receivedMessage.get("users"))
+                    self.removeUserRow(self.receivedMessage.get("users"))
                     self.messagesdisplay.append(self.receivedMessage.get("content"))
-
+                
                 
                 #elif self.receivedMessage.get("type") == "message":
                 #    self.messagesdisplay.append(f"<{self.receivedMessage.get('username')}> {self.receivedMessage.get('content')}")
@@ -344,6 +360,8 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     print(e)
                     self.messagesdisplay.append("Error receiving message.")
+        print("Receive Thread ended")
+        self.connected = False
     
     def timeout(self, minutes):
         self.messageEntry.setEnabled(False)
@@ -357,11 +375,14 @@ class MainWindow(QMainWindow):
 
 
     def abandonConnection(self):
-        if self.sock:
+        if self.connected:
             try:
+                
                 self.sock.shutdown(s.SHUT_RDWR)
                 self.sock.close()
                 self.messagesdisplay.append("<b>You have disconnected")
+                self.connected = False
+                self.resetUserList()
             except Exception as e:
                 print(e)
                 pass
@@ -376,7 +397,3 @@ if __name__ == "__main__": # checks if this file is being run
     window.show() # actually shows the window wow
     
     app.exec()
-
-
-
- 
