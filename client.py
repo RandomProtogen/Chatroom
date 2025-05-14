@@ -328,6 +328,7 @@ class MainWindow(QMainWindow):
 
         while self.connected:
             #self.users = []
+            
             receivedMessagejson = None
             self.receivedMessage = {}
             try:
@@ -340,7 +341,6 @@ class MainWindow(QMainWindow):
                 if self.connected:
 
                     self.msgreceived.emit("Server has closed")
-                
             except Exception as e:
                 print("Error")
                 print(e)
