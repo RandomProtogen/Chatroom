@@ -231,7 +231,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print("Error: ", e)
 
-    def sendMessage(self):
+    def sendMessage(self, users):
         message = self.messageEntry.text()
 
         if self.messageEntry.text() == "":
@@ -239,32 +239,32 @@ class MainWindow(QMainWindow):
         elif message[0] == "/":
             self.messageEntry.setText("")
             if message == "/help":
-                self.messagesdisplay.append("Commands are:\n/help - Brings up this list\n/whisper or /w - privately message a user\n/clear - Clears the message log\n/profanity add/remove/toggle - Adds to or removes from the profanity or toggles it on or off\n/disconnect - If you can't manage to find the button yourself")
-            
+                self.messagesdisplay.append("Commands are:\n/help - Brings up this list\n/whisper or /w - privately message a user\n/clear - Clears the message log\n/profanity add/remove/toggle - Adds to or removes from the profanity or toggles it on or off\n/disconnect - If you can't manage to find the button yourself") 
             elif message.split()[0] in ["/whisper", "/w"]:
                 messagelist = message.split()
-                count = 0
-                for i in messagelist:
-                    count += 1
-                if count == 1:
-                    self.messagesdisplay.append("No recipient was specified")
+                if len(messagelist) < 3:  
+                    self.messagesdisplay.append("No recipient or message was specified")
+                    return
+                if messagelist[1] not in self.users: 
+                    self.messagesdisplay.append("That user does not exist")
                     return
                 print(messagelist)
                 recipient = messagelist[1]
-                messagelist.remove(messagelist[0])
-                messagelist.remove(messagelist[0])
+                messagelist.remove(messagelist[0])  
+                messagelist.remove(messagelist[0])  
                 print(messagelist)
-                messagelist = messagelist.remove(messagelist[0])
                 
-                self.sock.send(json.dumps({"type": "whisper", "to": recipient, "from": self.usernameEntry.text(), "content": " ".join(message)}).encode())
-
-            else:
-                self.messagesdisplay.append(f"'{message}' not found")
-
+                self.sock.send(json.dumps({
+                    "type": "whisper",
+                    "to": recipient,
+                    "from": self.usernameEntry.text(),
+                    "content": " ".join(messagelist) 
+                }).encode())
         else:
             print("sent")
             # This is where the message will be then sent as a dictionary
             self.sock.send(json.dumps({"type": "message", "username": self.usernameEntry.text(), "content": message, "colour": ""}).encode())
+            #print({"type": "message", "username": self.usernameEntry.text(), "content": message, "colour": ""})
             #self.messagesdisplay.append(f"<{self.messageinfo['username']}> {self.messageinfo['content']}") # change this to be parts of the json stuff
             self.messageEntry.setText("")
 
@@ -328,24 +328,21 @@ class MainWindow(QMainWindow):
 
         while self.connected:
             #self.users = []
-            
             receivedMessagejson = None
             self.receivedMessage = {}
             try:
                 receivedMessagejson = sock.recv(4096).decode()
+                #self.msgreceived.emit(receivedMessagejson)
                 self.receivedMessage = json.loads(receivedMessagejson)
                 print("Raw Input:", self.receivedMessage)
                 #self.receivedMessage = self.receivedMessage.strip()
-                
             except WindowsError:
                 if self.connected:
-
                     self.msgreceived.emit("Server has closed")
             except Exception as e:
-                print("Error")
-                print(e)
+                print(f"Error {e}")
                 self.msgreceived.emit(f"Error in receivedThread: {e}")
-                print("you stupid idiot mf 2")
+                #print("you stupid idiot mf 2")
                 time.sleep(1)
                 sock.close()
                 break
@@ -394,7 +391,7 @@ class MainWindow(QMainWindow):
                 
 
                 elif self.receivedMessage.get("type") == "whisper":
-                    self.msgreceived.emit(f"<i>{self.receivedMessage.get('username')} whispers to you: {self.receivedMessage.get('content')}")
+                    self.msgreceived.emit(f"<i>{self.receivedMessage['from']} whispers to you: {self.receivedMessage.get('content')}")
             
             except Exception as e:
                 print(e)
