@@ -2,10 +2,10 @@ import sys, datetime, logging, socket as s, select, json
 from PySide6.QtWidgets import *
 from PySide6.QtGui import *
 from PySide6.QtCore import *
-#import qdarktheme
+import qdarktheme
 
 #todo
-#password and disbale/enable ask to join server
+#password and disbale/enable ask to join server (p)
 #implement timeout fuction with nic
 #whisper functions DONE MAYBE
 #inactivity kick (we shall see)
@@ -16,7 +16,7 @@ from PySide6.QtCore import *
 #coloured usernames
 #custom ban, kick, timeout messages
 #persistent messaging
-#encryption
+#encryption (assymetric, physical key encryption)
 
 class ClientSignals(QObject):
     userjoined = Signal(str, str)  #callsign, ip
@@ -245,7 +245,7 @@ class ServerApp(QMainWindow):
                 #closes client connections
                 for sock in list(self.connections.keys()):
                     try:
-                        sock.send(json.dumps({"type": "message", "username": "SERVER", "content": "Server Closing..."}).encode())
+                        sock.send(json.dumps(dict({"type": "message", "username": "SERVER", "content": "Server Closing..."})).encode())
                         self.disconnect(sock)
                     except Exception:
                         pass
@@ -327,13 +327,13 @@ class ServerApp(QMainWindow):
 
         if action == 'kicked': #implement custom ban message aswell
             self.signals.logmsgs.emit(f'{callsign} has been kicked from the server.')
-            self.signals.msgreceived.emit(json.dumps({"type": "leave", "users": list(self.callsigntosock.keys()), "content": f"{callsign} has been kicked from the server."}))
+            self.signals.msgreceived.emit(json.dumps(dict({"type": "leave", "users": list(self.callsigntosock.keys()), "content": f"{callsign} has been kicked from the server."})))
         elif action == 'banned':
             self.signals.logmsgs.emit(f'{callsign} has been banned from the server.')
-            self.signals.msgreceived.emit(json.dumps({"type": "leave", "users": list(self.callsigntosock.keys()),"content": f"{callsign} has been banned from the server."}))
+            self.signals.msgreceived.emit(json.dumps(dict({"type": "leave", "users": list(self.callsigntosock.keys()),"content": f"{callsign} has been banned from the server."})))
         else:
             self.signals.logmsgs.emit(f'{callsign} has left the server.')
-            self.signals.msgreceived.emit(json.dumps({"type": "leave", "users": list(self.callsigntosock.keys()), "content": f"{callsign} has left the server."}))
+            self.signals.msgreceived.emit(json.dumps(dict({"type": "leave", "users": list(self.callsigntosock.keys()), "content": f"{callsign} has left the server."})))
 
     def updatetimer(self):
         now = datetime.datetime.now()
@@ -390,22 +390,31 @@ class ServerApp(QMainWindow):
 
 
     #admin tools placeholders
-    def kick(self, row):
+    def kick(self, row, btn=True):
         callsignitem = self.usertable.item(row, 0)
         if callsignitem:
             callsign = callsignitem.text()
-            reply = QMessageBox.question(self, 'Confirmation', f"Are you sure you want to kick {callsign}?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-            if reply == QMessageBox.Yes:
-                self.appendlog(f'{callsign} has been kicked')
-                logging.info(f'{callsign} has been kicked')
-                sock = self.callsigntosock.get(callsign)
+            if btn == True:
+                reply = QMessageBox.question(self, 'Confirmation', f"Are you sure you want to kick {callsign}?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if reply == QMessageBox.Yes:
+                    self.appendlog(f'{callsign} has been kicked')
+                    logging.info(f'{callsign} has been kicked')
+                    sock = self.callsigntosock.get(callsign)
+                    if sock:
+                        try:
+                            sock.send(json.dumps(dict({"type": "message", "username": "SERVER", "content": "You have been kicked from the server."})).encode())
+                        except Exception:
+                            pass
+                        self.removeuserrow(callsign, action='kicked')  #emit kick message
+                        self.disconnect(sock, reason='kicked')  #disconnect with reason 'kicked'
+            else:
                 if sock:
-                    try:
-                        sock.send(json.dumps({"type": "message", "username": "SERVER", "content": "You have been kicked from the server."}).encode())
-                    except Exception:
-                        pass
-                    self.removeuserrow(callsign, action='kicked')  #emit kick message
-                    self.disconnect(sock, reason='kicked')  #disconnect with reason 'kicked'
+                        try:
+                            sock.send(json.dumps(dict({"type": "message", "username": "SERVER", "content": "You have been kicked from the server."})).encode())
+                        except Exception:
+                            pass
+                        self.removeuserrow(callsign, action='kicked')  #emit kick message
+                        self.disconnect(sock, reason='kicked')  #disconnect with reason 'kicked'
 
     def ban(self, row):
         callsignitem = self.usertable.item(row, 0)
@@ -439,7 +448,7 @@ class ServerApp(QMainWindow):
             sock = self.callsigntosock.get(callsign)
             if sock:
                 try:
-                    sock.send(json.dumps({"type": "message", "username": "SERVER", "content": f"You have been banned from {self.name}"}).encode())
+                    sock.send(json.dumps(dict({"type": "message", "username": "SERVER", "content": f"You have been banned from {self.name}"})).encode())
                 except Exception:
                     pass
                 self.removeuserrow(callsign, action='banned')  #emit ban message
@@ -484,26 +493,26 @@ class SocketSelectWorker(QObject):
                 readable, _, exceptional = select.select(inputs, [], inputs, 1)
                 for sck in readable:
                     if sck is self.serversock:
-                        #accept new connection
+                        # accept new connection
                         try:
                             conn, addr = self.serversock.accept()
                             conn.setblocking(False)
                             ip = addr[0]
 
-                            #load banlist fresh from config
+                            # load banlist fresh from config
                             bannedips = set()
                             if self.configinput and self.configinput.text():
                                 try:
                                     with open(self.configinput.text(), 'r') as f:
                                         jsraw = f.read()
                                         jspars = json.loads(jsraw)
-                                        bannedips = set(jspars.get('banlist', {}).get('banned', []))
+                                        bannedips = set(jspars.get('banlist', {})).get('banned', [])
                                 except Exception as e:
                                     logging.error(f"Error reading banlist from config: {e}")
 
                             if ip in bannedips:
                                 try:
-                                    conn.send(json.dumps({"type": "message", "username": "SERVER", "content": "You are banned from this server."}).encode())
+                                    conn.send(json.dumps(dict({"type": "message", "username": "SERVER", "content": "You are banned from this server."})).encode())
                                 except Exception:
                                     pass
                                 conn.close()
@@ -511,10 +520,10 @@ class SocketSelectWorker(QObject):
                                 logging.info(f'Banned IP {ip} attempted to connect and was rejected.')
                                 continue
 
-                            #check if user cap is reached
+                            # check if user cap is reached
                             if len(self.connections) >= self.usercap:
                                 try:
-                                    conn.send(json.dumps({"type": "message", "username": "SERVER", "content": "User limit reached. Please try again later."}).encode())
+                                    conn.send(json.dumps(dict({"type": "message", "username": "SERVER", "content": "User  limit reached. Please try again later."})).encode())
                                 except Exception:
                                     pass
                                 conn.close()
@@ -527,28 +536,36 @@ class SocketSelectWorker(QObject):
                             self.signals.logmsgs.emit(f'{ip} has connected!')
                         except Exception as e:
                             logging.error(f"Accept failed: {e}")
-                            continue #just spitballin
+                            continue
                     else:
                         try:
                             data = sck.recv(2048)
                             if data:
                                 self.buffers[sck].extend(data)
-                                #check if callsign known for this socket
+                                # check if callsign known for this socket
                                 if sck not in self.connections:
-                                    #first message expected is callsign terminated by newline or all data available
+                                    # first message expected is callsign terminated by newline or all data available
                                     try:
-                                        #decode buffer and strip spaces/newlines
+                                        # decode buffer and strip spaces/newlines
                                         msg = self.buffers[sck].decode(errors='ignore').strip()
                                         if msg:
                                             callsign = msg
                                             ip = sck.getpeername()[0]
+
+                                            # Check for duplicate username
+                                            if callsign in self.callsigntosock:
+                                                conn.send(json.dumps(dict({"type": "message", "username": "SERVER", "content": "Username already taken. Please choose another one."})).encode())
+                                                self.signals.usersleft.emit(callsign)
+                                                self.signals.logmsgs.emit(f'Connection attempt from {ip} with duplicate username {callsign} rejected.')
+                                                logging.info(f'Connection attempt from {ip} with duplicate username {callsign} rejected.')
+                                                continue
+
                                             self.connections[sck] = (callsign, ip)
                                             self.callsigntosock[callsign] = sck
-                                            self.buffers[sck] = bytearray()  #clear buffer after callsign received
+                                            self.buffers[sck] = bytearray()  # clear buffer after callsign received
                                             self.signals.userjoined.emit(callsign, ip)
-                                            self.signals.logmsgs.emit(f'{callsign} has joined!') #implement custom join messages
-                                            self.signals.msgreceived.emit(json.dumps({"type": "join", "users": list(self.callsigntosock.keys()), "content": f"{callsign} has joined!"}))
-                                            print(list(self.callsigntosock.keys()))
+                                            self.signals.logmsgs.emit(f'{callsign} has joined!')
+                                            self.signals.msgreceived.emit(json.dumps(dict({"type": "join", "users": list(self.callsigntosock.keys()), "content": f"{callsign} has joined!"})))
                                             logging.info(f'{callsign} has joined!')
                                             if not self.configinput.text():
                                                 welcomemsg = f"Welcome to our humble chatroom {callsign}!"
@@ -561,39 +578,41 @@ class SocketSelectWorker(QObject):
                                                 except Exception: 
                                                     logging.error("Error reading config file, using default welcome message")
                                                     welcomemsg = f"Welcome to our humble chatroom {callsign}!"
-                                                    
-                                            sck.send(json.dumps({"type": "welcome", "content": str(welcomemsg), "users": list(self.callsigntosock.keys())}).encode())
+                                                        
+                                            sck.send(json.dumps(dict({"type": "welcome", "content": str(welcomemsg), "users": list(self.callsigntosock.keys())})).encode())
                                     except Exception as ex:
                                         logging.error(f"Error reading callsign: {ex}")
                                         self.closesock(sck, inputs)
                                 else:
                                     callsign, _ = self.connections[sck]
                                     try:
-                                        #consider all data as message (strip trailing newlines)
+                                        # consider all data as message (strip trailing newlines)
                                         msgtext = self.buffers[sck].decode(errors='ignore').strip()
                                         msgtextjs = json.loads(msgtext)
                                         if msgtextjs == None or "":
                                             raise Exception('this is goddamn empty')
                                         if msgtext:
                                             if msgtextjs['type'] == "message":
-                                                #msg = f'<{callsign}> {msgtext}'
+                                                if 'username' not in msgtextjs:
+                                                    raise Exception(f"Received message without username: {msgtext}")
                                                 self.signals.logmsgs.emit(f'<{msgtextjs["username"]}> {msgtextjs["content"]}')
                                                 self.signals.msgreceived.emit(msgtext)
                                                 logging.info(f'Message from {msgtextjs["username"]}: {msgtextjs["content"]}')
-                                                #clear buffer after processing message
                                                 self.buffers[sck] = bytearray()
                                             elif msgtextjs['type'] == "whisper":
-                                                self.signals.logmsgs.emit(f'<{msgtextjs["username"]}> whispered to <{msgtextjs["to"]}> {msgtextjs["content"]}')
-                                                logging.info(f'<{msgtextjs["username"]}> whispered to <{msgtextjs["to"]}> {msgtextjs["content"]}')
+                                                if "to" not in list(json.loads(msgtext).keys()) or "from" not in list(json.loads(msgtext).keys()): 
+                                                    raise Exception(f"Received message without to or from: {msgtext}")
+                                                self.signals.logmsgs.emit(f'<{msgtextjs["from"]}> whispered to <{msgtextjs["to"]}> {msgtextjs["content"]}')
+                                                logging.info(f'<{msgtextjs["from"]}> whispered to <{msgtextjs["to"]}> {msgtextjs["content"]}')
                                                 recepient = self.callsigntosock.get(str(msgtextjs["to"]))
-                                                recepient.send(msgtext.encode())
+                                                recepient.send(self.buffers[sck])
                                                 self.buffers[sck] = bytearray()
-                                                #return 'ur mother'
                                     except Exception as e:
                                         logging.error(f"Error processing message from {callsign}: {e}")
                                         self.closesock(sck, inputs)
+
                             else:
-                                #no data means client closed connection
+                                # no data means client closed connection
                                 self.closesock(sck, inputs)
                         except Exception as e:
                             logging.error(f"Error receiving data: {e}")
@@ -622,7 +641,7 @@ class SocketSelectWorker(QObject):
             pass
 
 if __name__ == "__main__":
-    app = QApplication([])
+    app = QApplication(sys.argv)
     #app.setStyleSheet(qdarktheme.load_stylesheet())
     window = ServerApp()
     window.show()
