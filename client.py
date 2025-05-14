@@ -25,7 +25,7 @@ from PySide6.QtCore import QSize, Qt, QThread, Signal
 from PySide6.QtGui import *
 from PySide6.QtWidgets import *
 from PySide6.QtCore import *
-import _thread, sys, time, threading, json
+import _thread, sys, time, threading, json, asyncio
 import socket as s
 
 
@@ -57,7 +57,7 @@ class MainWindow(QMainWindow):
         my_icon.addFile('images\\image.png')
         self.setWindowIcon(my_icon) # sets window icon
         self.initialiseWidgets()
-        self.msgreceived.connect(self.messagesdisplay.append)
+        self.msgreceived.connect(self.receiveMessage)
         self.join.connect(self.addUserRow)
         self.leave.connect(self.removeUserRow)
         self.resetSignal.connect(self.resetUserList)
@@ -65,6 +65,11 @@ class MainWindow(QMainWindow):
         self.closeServer.connect(self.abandonConnection)
         self.connectbtn.connect(self.connectButton.setText)
         self.users = []
+        with open("profanity_list.txt", "r") as f:
+            self.profanities = f.readline()
+            self.profanities = self.profanities.split()
+            print(self.profanities)
+        self.profanitiestoggle = False
         self.messagesdisplay.append("Welcome to Rizzcord. \nOnce you have joined a server you may type /help to view the commands.")
 
     def initialiseWidgets(self): # new function just to seperate the creation and initialization of widgets
@@ -189,6 +194,17 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(centralWidget)
 
 
+    def receiveMessage(self, msg):
+        if self.profanitiestoggle == True:
+            for prof in self.profanities:
+                proflength = len(prof)
+                censor = ""
+                for i in range(proflength):
+                    censor += "*"
+                msg = msg.casefold().replace(prof, censor)
+            self.messagesdisplay.append(msg)
+        else:
+            self.messagesdisplay.append(msg)
 
     def serverConnection(self):
         print("test")
@@ -231,7 +247,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print("Error: ", e)
 
-    def sendMessage(self, users):
+    def sendMessage(self):
         message = self.messageEntry.text()
 
         if self.messageEntry.text() == "":
@@ -239,7 +255,15 @@ class MainWindow(QMainWindow):
         elif message[0] == "/":
             self.messageEntry.setText("")
             if message == "/help":
-                self.messagesdisplay.append("Commands are:\n/help - Brings up this list\n/whisper or /w - privately message a user\n/clear - Clears the message log\n/profanity add/remove/toggle - Adds to or removes from the profanity or toggles it on or off\n/disconnect - If you can't manage to find the button yourself") 
+                self.messagesdisplay.append("Commands are:\n/help - Brings up this list\n/whisper or /w - privately message a user\n/clear - Clears the message log\n/profanity add/remove/toggle/view - Adds to or removes from the profanity or toggles it on or off\n/disconnect - If you can't manage to find the button yourself\nUse '/help <command>' to find further information on the command")
+            elif message.split()[0].lower() == "/help":
+                if message.split()[1].lower() in ["whisper", "w", "/whisper", "/w"]:
+                    self.messagesdisplay.append("/Whisper or /w for short, allows you to privately message another user in the chatroom.\nCorrect syntax: /whisper <recipient> <message>")
+                elif message.split()[1].lower() in ["clear", "/clear"]:
+                    self.messagesdisplay.append("Inputting /clear will clear the messages display.")
+                elif message.split()[1].lower() in ["/profanity", "profanity"]:
+                    self.messagesdisplay.append("You may use /profanity to modify profanities that should be censored out during the session.\nCorrect syntax:\n/profanity add <word you want to the profanity list>\n/profanity remove <word you want to remove from the profanity list>\n/profanity toggle (either turns the profanity filter on or off)\n/profanity view (will show all filtered words)")
+
             elif message.split()[0] in ["/whisper", "/w"]:
                 messagelist = message.split()
                 if len(messagelist) < 3:  
@@ -260,19 +284,68 @@ class MainWindow(QMainWindow):
                     "from": self.usernameEntry.text(),
                     "content": " ".join(messagelist) 
                 }).encode())
+                self.messagesdisplay.append(f"<i>You whisper to {recipient}: {" ".join(messagelist)}")
+                '''messagelist = message.split()
+                count = 0
+                for i in messagelist:
+                    count += 1
+                if count == 1:
+                    self.messagesdisplay.append("No recipient was specified")
+                    return
+                print(messagelist)
+                recipient = messagelist[1]
+                messagelist.remove(messagelist[0])
+                messagelist.remove(messagelist[0])
+                print(messagelist)
+                messagelist = messagelist.remove(messagelist[0])
+                
+                self.sock.send(json.dumps({"type": "whisper", "to": recipient, "from": self.usernameEntry.text(), "content": " ".join(message)}).encode())
+                self.messagesdisplay.append(f"<i>You whisper to {recipient}: {" ".join(message)}")'''
+            elif message.split()[0] == "/clear":
+                self.messagesdisplay.setText("")
+                self.messagesdisplay.append("Messages cleared.")
+            
+            elif message.split()[0].lower() == "/profanity":
+                if message.split()[1].lower() == "add":
+                    self.profanities.append(message.split()[2].lower())
+                    with open("profanity_list.txt", "w") as f:
+                        f.write(" ".join(self.profanities))
+                        print(self.profanities)
+                        self.messagesdisplay.append("Item added to profanities list")
+                elif message.split()[1].lower() == "remove":
+                    try:
+                        self.profanities.remove(message.split()[2].lower())
+                        with open("profanity_list.txt", "w") as f:
+                            f.write(" ".join(self.profanities))
+                            print(self.profanities)
+                            self.messagesdisplay.append("Item removed.")
+                    except ValueError:
+                        self.messagesdisplay.append("Item specified not in profanities.")
+                elif message.split()[1].lower() == "toggle":
+                    if self.profanitiestoggle == True:
+                        self.profanitiestoggle = False
+                        self.messagesdisplay.append("Profanity filter turned OFF")
+                    else:
+                        self.profanitiestoggle = True
+                        self.messagesdisplay.append("Profanity filter turned ON")
+                elif message.split()[1].lower() == "view":
+                    self.messagesdisplay.append("Registered profanites are: " + ", ".join(self.profanities))
+            else:
+                self.messagesdisplay.append(f"'{message}' not found")
+
         else:
             print("sent")
             # This is where the message will be then sent as a dictionary
             self.sock.send(json.dumps({"type": "message", "username": self.usernameEntry.text(), "content": message, "colour": ""}).encode())
-            #print({"type": "message", "username": self.usernameEntry.text(), "content": message, "colour": ""})
             #self.messagesdisplay.append(f"<{self.messageinfo['username']}> {self.messageinfo['content']}") # change this to be parts of the json stuff
             self.messageEntry.setText("")
 
 
 
-    def closeEvent(self, event: QCloseEvent):
+    def closeEvent(self, event: QCloseEvent): # closeEvent() is automatically defined by PySide6 to run when the window is closed. In this case, the connection will be abandoned when the window is
         print("dead")
         self.abandonConnection()
+
 
 
     def establishConnection(self):
@@ -328,22 +401,25 @@ class MainWindow(QMainWindow):
 
         while self.connected:
             #self.users = []
+            
             receivedMessagejson = None
             self.receivedMessage = {}
             try:
                 receivedMessagejson = sock.recv(4096).decode()
-                #self.msgreceived.emit(receivedMessagejson)
                 self.receivedMessage = json.loads(receivedMessagejson)
                 print("Raw Input:", self.receivedMessage)
                 #self.receivedMessage = self.receivedMessage.strip()
+                
             except WindowsError:
                 if self.connected:
+
                     self.msgreceived.emit("Server has closed")
             except Exception as e:
-                print(f"Error {e}")
+                print("Error")
+                print(e)
                 self.msgreceived.emit(f"Error in receivedThread: {e}")
-                #print("you stupid idiot mf 2")
-                time.sleep(1)
+                self.connectbtn.emit("Connect")
+                time.sleep(0.5)
                 sock.close()
                 break
             
@@ -391,7 +467,8 @@ class MainWindow(QMainWindow):
                 
 
                 elif self.receivedMessage.get("type") == "whisper":
-                    self.msgreceived.emit(f"<i>{self.receivedMessage['from']} whispers to you: {self.receivedMessage.get('content')}")
+                    self.msgreceived.emit(f"<i>{self.receivedMessage.get('username')} whispers to you: {self.receivedMessage.get('content')}")
+                    
             
             except Exception as e:
                 print(e)
