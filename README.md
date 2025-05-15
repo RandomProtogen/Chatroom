@@ -5,7 +5,7 @@ no ddos per favor
 
 **Future Client Plans/to do list**
 
-
+'''
 to do:
 make gui DONE
 when exit signal is called; cleanly closes connections
@@ -20,3 +20,4 @@ connect to server
 spam limit
 client based profanity filtering
 add image support (pls dear god no)
+'''
