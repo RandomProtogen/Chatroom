@@ -1,25 +1,3 @@
-"""
-
-to do:
-make gui DONE
-when exit signal is called; cleanly closes connections
-make showing server info toggleable
-implement json for messages [date/time, username, username colour, message content] pretty much done
-add users who are typing when input.text.changed input != ""
-sort of account creation (create username, colour)
-colour for usernames
-user list
-/ commands (whispering, help, cls, possible admin commands)
-connect to server
-spam limit
-client based profanity filtering
-add image support (pls dear god no)
-
-
-
-
-
-"""
 
 from PySide6.QtCore import QSize, Qt, QThread, Signal
 from PySide6.QtGui import *
@@ -41,7 +19,7 @@ class MainWindow(QMainWindow):
     
     msgreceived = Signal(str)
     join = Signal(str)
-    leave = Signal([])
+    leave = Signal(str)
     resetSignal = Signal([])
     timeoutSignal = Signal(int)
     closeServer = Signal()
@@ -58,13 +36,12 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(my_icon) # sets window icon
         self.initialiseWidgets()
         self.msgreceived.connect(self.receiveMessage)
-        self.join.connect(self.addUserRow)
-        self.leave.connect(self.removeUserRow)
+        self.join.connect(self.addUser)
+        self.leave.connect(self.removeUser)
         self.resetSignal.connect(self.resetUserList)
         self.timeoutSignal.connect(self.timeout)
         self.closeServer.connect(self.abandonConnection)
         self.connectbtn.connect(self.connectButton.setText)
-        self.users = []
         with open("profanity_list.txt", "r") as f:
             self.profanities = f.readline()
             self.profanities = self.profanities.split()
@@ -86,16 +63,10 @@ class MainWindow(QMainWindow):
         userListTitle = QLabel("Users:") # creates the title
         userListTitle.setStyleSheet("font-weight: bold; font-size: 16px;")
         userListMain.addWidget(userListTitle)
-        self.userList = QTableWidget() #creates log text box
-        self.userList.setColumnCount(2)
-        self.userList.setHorizontalHeaderLabels(["User", "Actions"])
-        self.userList.horizontalHeader().setStretchLastSection(True)
-        
-        # User list should update when users change
-
+        self.userList = QTextEdit("")
+        self.userList.setReadOnly(True)
         userListMain.addWidget(self.userList)
         infoColumnnew.addLayout(userListMain)
-
 
         # Server/User info
 
@@ -239,13 +210,7 @@ class MainWindow(QMainWindow):
     
     
     def resetUserList(self):
-        try:
-            count = self.userList.rowCount()
-            for row in range(0, count):
-                self.userList.removeRow(row)
-                self.users = []
-        except Exception as e:
-            print("Error: ", e)
+        self.userList.setPlainText("")
 
     def sendMessage(self):
         message = self.messageEntry.text()
@@ -269,7 +234,7 @@ class MainWindow(QMainWindow):
                 if len(messagelist) < 3:  
                     self.messagesdisplay.append("No recipient or message was specified")
                     return
-                if messagelist[1] not in self.users: 
+                if messagelist[1] not in self.userList.toPlainText().split("\n"): 
                     self.messagesdisplay.append("That user does not exist")
                     return
                 print(messagelist)
@@ -367,40 +332,34 @@ class MainWindow(QMainWindow):
 
         self.callsign = str(self.usernameEntry.text())
 
-    def addUserRow(self, user):
-        
+    def addUser(self, user):
         print("User: ", user)
         if self.connected:
-            if user not in self.users:
-                position = self.userList.rowCount()
-                self.userList.insertRow(int(position))
-                self.userList.setItem(int(position), 0, QTableWidgetItem(user))
-                self.users.append(user)
-                print(self.users)
+            users = self.userList.toPlainText().split("\n")
+            if user not in users:
+                self.userList.append(user)
+                
+                
+                print(users)
     
-    def removeUserRow(self, user):
-        count = self.userList.rowCount()
-        self.resetUserList()
-        self.users.remove(user)
-        count = 0
+    def removeUser(self, user):
+        users = self.userList.toPlainText().split("\n")
+        try:
+            users.remove(user)
+        except Exception as e:
+            print(e)
+        self.userList.setPlainText("")
+        for i in users:
+            self.userList.append(i)
+        
+       
 
-        for i in self.users:
-            self.userList.insertRow(count)
-            self.userList.setItem(count, 0, QTableWidgetItem(i))
-            count += 1
-            item = self.userList.item(count, 0)
-            '''
-            if item and item.text() == user:
-                self.userList.removeRow(row)
-                self.users.remove(user)
-                break
-            '''
-    
+
     
     def receiveThread(self, sock):
 
         while self.connected:
-            #self.users = []
+            
             
             receivedMessagejson = None
             self.receivedMessage = {}
@@ -437,7 +396,7 @@ class MainWindow(QMainWindow):
 
                 elif self.receivedMessage.get("type") == "timeout":
                     self.msgreceived.emit(self.receivedMessage.get("content"))
-                    self.timeoutThread = threading.Thread(target=self.timeout, args=self.receivedMessage.get("time"))
+                    self.timeoutThread = threading.Thread(target=self.timeout, args=self.receivedMessage.get("time"),)
                     self.timeoutThread.start()
 
                 elif self.receivedMessage.get("type") == "welcome":
@@ -458,7 +417,7 @@ class MainWindow(QMainWindow):
 
                 
                 elif self.receivedMessage.get("type") == "leave":
-                    self.leave.emit(self.receivedMessage.get("users"))
+                    self.leave.emit(self.receivedMessage.get("users")[0])
                     self.msgreceived.emit(self.receivedMessage.get("content"))
                 
                 
@@ -501,7 +460,6 @@ class MainWindow(QMainWindow):
                 self.messagesdisplay.append("<b>You have disconnected")
                 self.connected = False
                 self.resetUserList()
-                self.users = []
             except Exception as e:
                 print(e)
                 pass
@@ -517,90 +475,3 @@ if __name__ == "__main__": # checks if this file is being run
     
     app.exec()
 
-
-
-"""
-George Papas Tom:
-
-1)
-from PySide6.QtCore import Signal
-
-class MainWindow(QMainWindow):
-    messageReceived = Signal(str)
-    userJoined = Signal(str)
-    userLeft = Signal(str)
-    resetUserListSignal = Signal()
-
-2)
-(still in main class)
-def __init__(self):
-    self.messageReceived.connect(self.messagesdisplay.append)
-    self.userJoined.connect(self.addUserRow)
-    self.userLeft.connect(self.removeUserRow)
-    self.resetUserListSignal.connect(self.resetUserList)
-
-3)
-in receive thread:
-self.messageReceived.emit(self.receivedMessage.get("content"))
-self.userJoined.emit(username)
-self.userLeft.emit(username)
-
-Example of recvthread:
-def receiveThread(self, sock):
-    while self.connected:
-        try:
-            data = sock.recv(4096).decode()
-            if not data:
-                break
-
-            self.receivedMessage = json.loads(data)
-
-            msg_type = self.receivedMessage.get("type")
-
-            if not msg_type:
-                self.messageReceived.emit("Error receiving message from server")
-                continue
-
-            if msg_type == "timeout":
-                self.messageReceived.emit(self.receivedMessage.get("content"))
-                self.timeoutThread = threading.Thread(
-                    target=self.timeout, 
-                    args=(self.receivedMessage.get("minutes", 1),)
-                )
-                self.timeoutThread.start()
-
-            elif msg_type == "welcome":
-                self.messageReceived.emit(self.receivedMessage.get("content"))
-
-            elif msg_type == "join":
-                users = self.receivedMessage.get("users", [])
-                for user in users:
-                    self.userJoined.emit(user)
-                self.messageReceived.emit(self.receivedMessage.get("content"))
-
-            elif msg_type == "kick":
-                self.messageReceived.emit(self.receivedMessage.get("content"))
-
-            elif msg_type == "leave":
-                self.userLeft.emit(self.receivedMessage.get("users"))
-                self.messageReceived.emit(self.receivedMessage.get("content"))
-
-            elif msg_type == "message":
-                username = self.receivedMessage.get("username")
-                content = self.receivedMessage.get("content")
-                self.messageReceived.emit(f"<{username}> {content}")
-
-        except (ConnectionResetError, json.JSONDecodeError) as e:
-            self.messageReceived.emit(f"Connection error: {e}")
-            break
-
-        except Exception as e:
-            self.messageReceived.emit(f"Unexpected error: {e}")
-            break
-
-    self.connected = False
-    sock.close()
-    self.messageReceived.emit("Disconnected from server.")
-    self.resetUserListSignal.emit()
-
-"""
