@@ -330,6 +330,7 @@ class MainWindow(QMainWindow):
             users.remove(user)
         except Exception as e:
             #print(e)
+            print()
         self.userList.setPlainText("")
         for i in users:
             self.userList.append(i)
@@ -419,7 +420,8 @@ class MainWindow(QMainWindow):
                 # #print(e)
                 try:
                     #self.messagesdisplay.append(self.receivedMessage)
-                    #print()
+                    print()
+                    
                 except Exception as e:
                     #print(e)
                     self.msgreceived.emit("Error receiving message.")
