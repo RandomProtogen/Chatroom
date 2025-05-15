@@ -1,4 +1,3 @@
-
 from PySide6.QtCore import QSize, Qt, QThread, Signal
 from PySide6.QtGui import *
 from PySide6.QtWidgets import *
@@ -7,13 +6,7 @@ import _thread, sys, time, threading, json, asyncio
 import socket as s
 
 
-
-
-
-
 # start of gui creation, oh boy
-
-
 
 class MainWindow(QMainWindow):
     
@@ -125,7 +118,7 @@ class MainWindow(QMainWindow):
         
 
         # Messages area
-        self.messagesdisplay = QTextEdit() #creates log text box
+        self.messagesdisplay = QTextEdit() #creates long text box
         self.messagesdisplay.setReadOnly(True) #makes it so you cant edit
         messageColumn.addWidget(self.messagesdisplay)
         
@@ -207,7 +200,7 @@ class MainWindow(QMainWindow):
             self.messageEntry.setEnabled(False)
             self.sendButton.setEnabled(False)
             self.abandonConnection()
-    
+
     
     def resetUserList(self):
         self.userList.setPlainText("")
@@ -242,7 +235,6 @@ class MainWindow(QMainWindow):
                 messagelist.remove(messagelist[0])  
                 messagelist.remove(messagelist[0])  
                 print(messagelist)
-                
                 self.sock.send(json.dumps({
                     "type": "whisper",
                     "to": recipient,
@@ -250,22 +242,7 @@ class MainWindow(QMainWindow):
                     "content": " ".join(messagelist) 
                 }).encode())
                 self.messagesdisplay.append(f"<i>You whisper to {recipient}: {" ".join(messagelist)}")
-                '''messagelist = message.split()
-                count = 0
-                for i in messagelist:
-                    count += 1
-                if count == 1:
-                    self.messagesdisplay.append("No recipient was specified")
-                    return
-                print(messagelist)
-                recipient = messagelist[1]
-                messagelist.remove(messagelist[0])
-                messagelist.remove(messagelist[0])
-                print(messagelist)
-                messagelist = messagelist.remove(messagelist[0])
-                
-                self.sock.send(json.dumps({"type": "whisper", "to": recipient, "from": self.usernameEntry.text(), "content": " ".join(message)}).encode())
-                self.messagesdisplay.append(f"<i>You whisper to {recipient}: {" ".join(message)}")'''
+            
             elif message.split()[0] == "/clear":
                 self.messagesdisplay.setText("")
                 self.messagesdisplay.append("Messages cleared.")
@@ -277,6 +254,7 @@ class MainWindow(QMainWindow):
                         f.write(" ".join(self.profanities))
                         print(self.profanities)
                         self.messagesdisplay.append("Item added to profanities list")
+                
                 elif message.split()[1].lower() == "remove":
                     try:
                         self.profanities.remove(message.split()[2].lower())
@@ -286,6 +264,7 @@ class MainWindow(QMainWindow):
                             self.messagesdisplay.append("Item removed.")
                     except ValueError:
                         self.messagesdisplay.append("Item specified not in profanities.")
+                
                 elif message.split()[1].lower() == "toggle":
                     if self.profanitiestoggle == True:
                         self.profanitiestoggle = False
@@ -293,6 +272,7 @@ class MainWindow(QMainWindow):
                     else:
                         self.profanitiestoggle = True
                         self.messagesdisplay.append("Profanity filter turned ON")
+                
                 elif message.split()[1].lower() == "view":
                     self.messagesdisplay.append("Registered profanites are: " + ", ".join(self.profanities))
             else:
@@ -383,12 +363,12 @@ class MainWindow(QMainWindow):
                 break
             
             try:
-                if not isinstance(self.receivedMessage, dict) or "type" not in self.receivedMessage:
+                if not isinstance(self.receivedMessage, dict) or "type" not in self.receivedMessage: # Checks if received message is a dictionary and has the 'type' header
                     self.msgreceived.emit("Error receiving message from server")
                     print("Error Receiving:", self.receivedMessage)
                     continue
                 
-                elif self.connected == False: # This is a failsafe
+                elif self.connected == False: # In case an unexpected disconnect occurs
                     self.receivedMessage = {}
                     self.connectbtn.emit("Connect")
                     #self.resetSignal.emit()
@@ -469,7 +449,7 @@ class MainWindow(QMainWindow):
 
 
 if __name__ == "__main__": # checks if this file is being run
-    app = QApplication(sys.argv)
+    app = QApplication(sys.argv) # sys.argv allows console inputs
     window = MainWindow()
     window.show() # actually shows the window wow
     
