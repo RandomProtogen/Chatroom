@@ -7,6 +7,7 @@ no ddos per favor
 
 '''
 to do:
+
 make gui DONE
 when exit signal is called; cleanly closes connections
 make showing server info toggleable
